@@ -2,7 +2,7 @@
     # Data Section
     source_data:    .half 0xFFFF, 0x1111, 0xAAAA, 0x1111, 0x1234, 0x1111, 0x2222, 0x1111
     source_data2:   .half 0x0000, 0x0001, 0x1234, 0x5678, 0xABAB, 0xABAB, 0xFEDC, 0xBA98
-    dest_data:      .align 8                     # Alineación para 4 elementos de 32 bits
+    dest_data:      .align 8                     # Alineación para 8 elementos de 16 bits
                     .half 0, 0, 0, 0, 0, 0, 0, 0  # Espacio para datos resultantes
 
 .text
