@@ -5,7 +5,7 @@
  *
  *  Permission to use, copy, modify, and/or distribute this software for any
  *  purpose with or without fee is hereby granted, provided that the above
- *  copyright notice and this permission notice appear in all copies.
+ *  copyright notice and this permission notice appear in all copies. 
  *
  *  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
  *  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
@@ -21,6 +21,7 @@
 /* verilator lint_off PINMISSING */
 /* verilator lint_off CASEOVERLAP */
 /* verilator lint_off CASEINCOMPLETE */
+
 
 `timescale 1 ns / 1 ps
 // `default_nettype none
@@ -52,51 +53,142 @@
 
 // this macro can be used to check if the verilog files in your
 // design are read in the correct order.
-`define PICORV32_V
 
+`define VECTOR_ENABLE
 
 /***************************************************************
  * picorv32
  ***************************************************************/
 
-module picorv32 #(
-	parameter [ 0:0] ENABLE_COUNTERS = 1,
-	parameter [ 0:0] ENABLE_COUNTERS64 = 1,
-	parameter [ 0:0] ENABLE_REGS_16_31 = 1,
+package rv_vector_pkg;
+
+  localparam SEW  = 32;
+  localparam XLEN = 32;
+  localparam VLEN = 128;
+  
+  typedef enum bit[2:0] {
+    INST_ADDR  = 3'b000,
+    INST_FETCH = 3'b001,
+    INST_LOAD  = 3'b010,
+    IDLE       = 3'b011,
+    OP_ADDR    = 3'b100,
+    OP_FETCH   = 3'b101,
+    ALU_OP     = 3'b110,
+    STORE      = 3'b111
+  } state_t;
+  
+  // Unión para interpretar el bus de VLEN bits según el SEW
+  typedef union packed {
+    logic [VLEN    -1:0]       ifull;
+    logic [VLEN/64 -1:0][63:0] i64;
+    logic [VLEN/32 -1:0][31:0] i32;
+    logic [VLEN/16 -1:0][15:0] i16;
+    logic [VLEN/8  -1:0][ 7:0] i8;
+  } vector_t;
+
+  
+  typedef enum logic [5:0] {
+  // Arithmetic
+    VADD    = 6'b000000, // vadd
+    VSUB    = 6'b000010, // vsub
+    VADC    = 6'b010000, // vadc    vd[i] = vs2[i] + vs1[i] + v0.mask[i]
+    VSBC    = 6'b010010, // vsbc    vd[i] = vs2[i] - vs1[i] - v0.mask[i]
+  // Min / max
+    VMINU   = 6'b000101, // vminu   unsigned
+    VMAXU   = 6'b000110, // vmaxu   unisgned
+  // Logic Ops
+    VAND    = 6'b001001, // vand    
+    VOR     = 6'b001010, // vor     
+    VXOR    = 6'b001011, // vxor    
+  // Comparison
+    VMSEQ   = 6'b011000, // vmseq   set bit if equal
+    VMSNE   = 6'b011001, // vmsne   set bit if !equal
+    VMSLTU  = 6'b011010, // vmsltu  set bit if less than             unsigned
+    VMSLT   = 6'b011011, // vmsltu  set bit if less than             signed
+    VMSLEU  = 6'b011100, // vmsleu  set bit if less than or equal    unsigned
+    VMSLE   = 6'b011101, // vmsle   set bit if less than or equal    signed
+  // Shifting
+    VSLL    = 6'b100101, // vsll
+    VSRL    = 6'b101000, // vsrl
+    VSRA    = 6'b101001,
+    
+    VMV     = 6'b010111
+  } vfunct6_t;
+  
+  typedef enum logic[2:0] {
+    OPIVV   = 3'b000,    // vins.vv
+    OPIVI   = 3'b011,    // vins.vi
+    OPIVX   = 3'b100,    // vins.vx
+    OPCFG   = 3'b111
+  } vfunct3_t;
+  
+  // OPCODEs
+  typedef enum logic [6:0] {
+    LOAD_FP  = 7'b0000111, // Floating point load
+    STORE_FP = 7'b0100111, // Floating point store
+    OP_V   = 7'b1010111  // Vector configuration or arithmetic op
+  } major_opcodes_t;
+  
+  typedef enum logic[2:0] {
+    SEW8    = 3'b000,
+    SEW16   = 3'b001,
+    SEW32   = 3'b010,
+    SEW64   = 3'b011
+  } sew_t;
+  
+endpackage
+
+module picorv32 
+    `ifdef VECTOR_ENABLE
+        import rv_vector_pkg::*;
+    `endif
+    #(
+	parameter [ 0:0] ENABLE_COUNTERS      = 1,
+	parameter [ 0:0] ENABLE_COUNTERS64    = 1,
+	parameter [ 0:0] ENABLE_REGS_16_31    = 1,
 	parameter [ 0:0] ENABLE_REGS_DUALPORT = 1,
-	parameter [ 0:0] LATCHED_MEM_RDATA = 0,
-	parameter [ 0:0] TWO_STAGE_SHIFT = 1,
-	parameter [ 0:0] BARREL_SHIFTER = 0,
-	parameter [ 0:0] TWO_CYCLE_COMPARE = 0,
-	parameter [ 0:0] TWO_CYCLE_ALU = 0,
-	parameter [ 0:0] COMPRESSED_ISA = 0,
-	parameter [ 0:0] CATCH_MISALIGN = 1,
-	parameter [ 0:0] CATCH_ILLINSN = 1,
-	parameter [ 0:0] ENABLE_PCPI = 0,
-	parameter [ 0:0] ENABLE_MUL = 0,
-	parameter [ 0:0] ENABLE_FAST_MUL = 0,
-	parameter [ 0:0] ENABLE_DIV = 0,
-	parameter [ 0:0] ENABLE_IRQ = 0,
-	parameter [ 0:0] ENABLE_IRQ_QREGS = 1,
-	parameter [ 0:0] ENABLE_IRQ_TIMER = 1,
-	parameter [ 0:0] ENABLE_TRACE = 0,
-	parameter [ 0:0] REGS_INIT_ZERO = 0,
-	parameter [31:0] MASKED_IRQ = 32'h 0000_0000,
-	parameter [31:0] LATCHED_IRQ = 32'h ffff_ffff,
-	parameter [31:0] PROGADDR_RESET = 32'h 0000_0000,
-	parameter [31:0] PROGADDR_IRQ = 32'h 0000_0010,
-	parameter [31:0] STACKADDR = 32'h ffff_ffff
-) (
+	parameter [ 0:0] LATCHED_MEM_RDATA    = 0,
+	parameter [ 0:0] TWO_STAGE_SHIFT      = 1,
+	parameter [ 0:0] BARREL_SHIFTER       = 0,
+	parameter [ 0:0] TWO_CYCLE_COMPARE    = 0,
+	parameter [ 0:0] TWO_CYCLE_ALU        = 0,
+	parameter [ 0:0] COMPRESSED_ISA       = 0,
+	parameter [ 0:0] CATCH_MISALIGN       = 1,
+	parameter [ 0:0] CATCH_ILLINSN        = 1,
+	parameter [ 0:0] ENABLE_PCPI          = 0,
+	parameter [ 0:0] ENABLE_MUL           = 0,
+	parameter [ 0:0] ENABLE_FAST_MUL      = 0,
+	parameter [ 0:0] ENABLE_DIV           = 0,
+	`ifdef VECTOR_ENABLE
+	  parameter [ 0:0] ENABLE_VEC         = 1,
+	  //parameter [12:0] VLEN               = 512,
+	`endif
+	`ifndef VECTOR_ENABLE
+	  parameter [ 0:0] ENABLE_VEC         = 0,
+	`endif
+	parameter [ 0:0] ENABLE_IRQ           = 0,
+	parameter [ 0:0] ENABLE_IRQ_QREGS     = 1,
+	parameter [ 0:0] ENABLE_IRQ_TIMER     = 1,
+	parameter [ 0:0] ENABLE_TRACE         = 0,
+	parameter [ 0:0] REGS_INIT_ZERO       = 0,
+	parameter [31:0] MASKED_IRQ           = 32'h 0000_0000,
+	parameter [31:0] LATCHED_IRQ          = 32'h ffff_ffff,
+	parameter [31:0] PROGADDR_RESET       = 32'h 0000_0000,
+	parameter [31:0] PROGADDR_IRQ         = 32'h 0000_0010,
+	parameter [31:0] STACKADDR            = 32'h ffff_ffff
+	
+    ) (
 	input clk, resetn,
 	output reg trap,
 
-	output reg        mem_valid,
-	output reg        mem_instr,
-	input             mem_ready,
-
-	output reg [31:0] mem_addr,
-	output reg [31:0] mem_wdata,
-	output reg [ 3:0] mem_wstrb,
+	output reg        mem_valid,  //The core initiates a memory transfer by asserting mem_valid
+	//All core outputs are stable over the mem_valid period.
+	output reg        mem_instr,  //If memory transefr is an instruction fetch, core asserts mem_instr
+	input             mem_ready,  //Asserted by the testbench when the memory port is free
+ 
+	output reg [31:0] mem_addr,  //Address from/to memory(store)
+	output reg [31:0] mem_wdata, //data to be written to the memory
+	output reg [ 3:0] mem_wstrb, //4 bit write enables for 4 bytes of data
 	input      [31:0] mem_rdata,
 
 	// Look-Ahead Interface
@@ -115,6 +207,18 @@ module picorv32 #(
 	input      [31:0] pcpi_rd,
 	input             pcpi_wait,
 	input             pcpi_ready,
+	
+	`ifdef VECTOR_ENABLE
+	  // Vector PCPI interface
+      output reg            pcpi_vec_valid,
+      output reg [31:0]     pcpi_vec_insn,
+      output     [VLEN-1:0] pcpi_vec_vs1,
+      output     [VLEN-1:0] pcpi_vec_vs2,
+      input      [VLEN-1:0] pcpi_vec_vd,
+      input                 pcpi_vec_wait,
+      input                 pcpi_vec_ready,
+      input                 pcpi_vec_wr,
+	`endif
 
 	// IRQ Interface
 	input      [31:0] irq,
@@ -158,6 +262,7 @@ module picorv32 #(
 	output reg        trace_valid,
 	output reg [35:0] trace_data
 );
+    
 	localparam integer irq_timer = 0;
 	localparam integer irq_ebreak = 1;
 	localparam integer irq_buserror = 2;
@@ -166,15 +271,54 @@ module picorv32 #(
 	localparam integer regfile_size = (ENABLE_REGS_16_31 ? 32 : 16) + 4*ENABLE_IRQ*ENABLE_IRQ_QREGS;
 	localparam integer regindex_bits = (ENABLE_REGS_16_31 ? 5 : 4) + ENABLE_IRQ*ENABLE_IRQ_QREGS;
 
-	localparam WITH_PCPI = ENABLE_PCPI || ENABLE_MUL || ENABLE_FAST_MUL || ENABLE_DIV;
+	localparam WITH_PCPI = ENABLE_PCPI || ENABLE_MUL || ENABLE_FAST_MUL || ENABLE_DIV || ENABLE_VEC;
 
 	localparam [35:0] TRACE_BRANCH = {4'b 0001, 32'b 0};
 	localparam [35:0] TRACE_ADDR   = {4'b 0010, 32'b 0};
 	localparam [35:0] TRACE_IRQ    = {4'b 1000, 32'b 0};
+	
+	/***************************************************************
+     * Implementación de la Extensión Vectorial (RVV)
+     ***************************************************************/
+	`ifdef VECTOR_ENABLE
+        // Banco de registros vectoriales
+        reg [VLEN-1:0] vregs [0:31]; // 32 registros vectoriales
+    
+        integer j;
+        initial begin
+            if (REGS_INIT_ZERO) begin
+                for (j = 0; j < 32; j = j+1)
+                    vregs[j] = '0;
+            end
+        end
+        
+        // Registros y señales para manejo vectorial
+        wire [31:0] vcsr_vlenb = VLEN/8; // Vector register length in bytes (128/8)
+        reg [31:0]  vcsr_vtype = {26'b0, 3'b010, 3'b000};  // Vector data type configuration
+        reg [31:0]  vcsr_vl    = VLEN/32;  // 16 elementos por defecto
+        
+        // Vector configuration fields
+        sew_t       vsew  = sew_t'(vcsr_vtype[5:3]);  // SEW encoding (element width)
+        wire [2:0]  vlmul = vcsr_vtype[2:0];          // LMUL encoding (register group multiplier)
+        reg [6:0]   SEW   = 4*(2 << vcsr_vtype[5:3]); // Actual SEW value
+        
+        reg [VLEN-1:0] vreg_out;  // Resultado vectorial
+        reg            vm;        // Vector mask
+        
+        // Lógica de escritura en registros vectoriales
+
+        reg [VLEN-1:0] vreg_pcpi_op1;
+	    reg [VLEN-1:0] vreg_pcpi_op2;
+	    reg [VLEN-1:0] pcpi_int_vd;
+	    
+	    assign pcpi_vec_vs1 = vreg_pcpi_op1;
+        assign pcpi_vec_vs2 = vreg_pcpi_op2;
+        
+    `endif // VECTOR_ENABLE
 
 	reg [63:0] count_cycle, count_instr;
 	reg [31:0] reg_pc, reg_next_pc, reg_op1, reg_op2, reg_out;
-	reg [4:0] reg_sh;
+	reg [4:0]  reg_sh;
 
 	reg [31:0] next_insn_opcode;
 	reg [31:0] dbg_insn_opcode;
@@ -202,7 +346,7 @@ module picorv32 #(
 `ifndef PICORV32_REGS
 	reg [31:0] cpuregs [0:regfile_size-1];
 
-	integer i;
+    integer i;
 	initial begin
 		if (REGS_INIT_ZERO) begin
 			for (i = 0; i < regfile_size; i = i+1)
@@ -296,9 +440,9 @@ module picorv32 #(
 			.pcpi_ready(pcpi_mul_ready )
 		);
 	end else begin
-		assign pcpi_mul_wr = 0;
-		assign pcpi_mul_rd = 32'bx;
-		assign pcpi_mul_wait = 0;
+		assign pcpi_mul_wr    = 0;
+		assign pcpi_mul_rd    = 32'bx;
+		assign pcpi_mul_wait  = 0;
 		assign pcpi_mul_ready = 0;
 	end endgenerate
 
@@ -316,17 +460,55 @@ module picorv32 #(
 			.pcpi_ready(pcpi_div_ready )
 		);
 	end else begin
-		assign pcpi_div_wr = 0;
-		assign pcpi_div_rd = 32'bx;
-		assign pcpi_div_wait = 0;
+		assign pcpi_div_wr    = 0;
+		assign pcpi_div_rd    = 32'bx;
+		assign pcpi_div_wait  = 0;
 		assign pcpi_div_ready = 0;
 	end endgenerate
+	
+	`ifdef VECTOR_ENABLE
+	   // Vector Processing Unit
+    generate if (ENABLE_VEC) begin
+        picorv32_pcpi_vec pcpi_vec (
+            .clk       (clk),
+            .resetn    (resetn),
+            .pcpi_valid(pcpi_vec_valid),
+            .pcpi_insn (pcpi_vec_insn ),
+            .pcpi_vs1  (pcpi_vec_vs1  ),
+            .pcpi_vs2  (pcpi_vec_vs2  ),
+            .pcpi_wr   (pcpi_vec_wr   ),
+            .pcpi_vd   (pcpi_vec_vd   ),
+            .pcpi_wait (pcpi_vec_wait ),
+            .pcpi_ready(pcpi_vec_ready)
+        );
+    end else begin
+        assign pcpi_vec_wr    = 0;
+        assign pcpi_vec_vd    = 'bx;
+        assign pcpi_vec_wait  = 0;
+        assign pcpi_vec_ready = 0;
+    end endgenerate 
+	`endif
 
 	always @* begin
 		pcpi_int_wr = 0;
 		pcpi_int_rd = 32'bx;
-		pcpi_int_wait  = |{ENABLE_PCPI && pcpi_wait,  (ENABLE_MUL || ENABLE_FAST_MUL) && pcpi_mul_wait,  ENABLE_DIV && pcpi_div_wait};
-		pcpi_int_ready = |{ENABLE_PCPI && pcpi_ready, (ENABLE_MUL || ENABLE_FAST_MUL) && pcpi_mul_ready, ENABLE_DIV && pcpi_div_ready};
+	`ifdef VECTOR_ENABLE
+	    pcpi_int_vd = 32'bx;
+	`endif
+		pcpi_int_wait  = |{ENABLE_PCPI && pcpi_wait,  
+		                 (ENABLE_MUL || ENABLE_FAST_MUL) && pcpi_mul_wait,  
+		                 ENABLE_DIV && pcpi_div_wait
+		                 `ifdef VECTOR_ENABLE
+		                   ,ENABLE_VEC && pcpi_vec_wait
+		                 `endif
+		                 };
+		pcpi_int_ready = |{ENABLE_PCPI && pcpi_ready, 
+		                 (ENABLE_MUL || ENABLE_FAST_MUL) && pcpi_mul_ready, 
+		                 ENABLE_DIV && pcpi_div_ready
+		                 `ifdef VECTOR_ENABLE
+		                   ,ENABLE_VEC && pcpi_vec_ready
+		                 `endif
+		                 };
 
 		(* parallel_case *)
 		case (1'b1)
@@ -342,55 +524,65 @@ module picorv32 #(
 				pcpi_int_wr = pcpi_div_wr;
 				pcpi_int_rd = pcpi_div_rd;
 			end
+			`ifdef VECTOR_ENABLE
+            ENABLE_VEC && pcpi_vec_ready: begin
+                pcpi_int_wr = pcpi_vec_wr;
+                pcpi_int_vd = pcpi_vec_vd; // declarar la señal pcpi_int_vd
+            end
+            `endif
 		endcase
 	end
 
 
 	// Memory Interface
 
-	reg [1:0] mem_state;
-	reg [1:0] mem_wordsize;
-	reg [31:0] mem_rdata_word;
-	reg [31:0] mem_rdata_q;
-	reg mem_do_prefetch;
-	reg mem_do_rinst;
-	reg mem_do_rdata;
-	reg mem_do_wdata;
+	reg [1:0]   mem_state;
+	reg [1:0]   mem_wordsize;
+	reg [31:0]  mem_rdata_word;
+	reg [31:0]  mem_rdata_q;
+	reg         mem_do_prefetch;
+	reg         mem_do_rinst;
+	reg         mem_do_rdata;
+	reg         mem_do_wdata;
 
-	wire mem_xfer;
-	reg mem_la_secondword, mem_la_firstword_reg, last_mem_valid;
-	wire mem_la_firstword = COMPRESSED_ISA && (mem_do_prefetch || mem_do_rinst) && next_pc[1] && !mem_la_secondword;
-	wire mem_la_firstword_xfer = COMPRESSED_ISA && mem_xfer && (!last_mem_valid ? mem_la_firstword : mem_la_firstword_reg);
+	wire        mem_xfer;
+	reg         mem_la_secondword, mem_la_firstword_reg, last_mem_valid;
+	wire        mem_la_firstword = COMPRESSED_ISA && (mem_do_prefetch || mem_do_rinst) && next_pc[1] && !mem_la_secondword;
+	wire        mem_la_firstword_xfer = COMPRESSED_ISA && mem_xfer && (!last_mem_valid ? mem_la_firstword : mem_la_firstword_reg);
 
-	reg prefetched_high_word;
-	reg clear_prefetched_high_word;
-	reg [15:0] mem_16bit_buffer;
+	reg         prefetched_high_word;
+	reg         clear_prefetched_high_word;
+	reg [15:0]  mem_16bit_buffer;
 
 	wire [31:0] mem_rdata_latched_noshuffle;
 	wire [31:0] mem_rdata_latched;
 
-	wire mem_la_use_prefetched_high_word = COMPRESSED_ISA && mem_la_firstword && prefetched_high_word && !clear_prefetched_high_word;
-	assign mem_xfer = (mem_valid && mem_ready) || (mem_la_use_prefetched_high_word && mem_do_rinst);
+	wire        mem_la_use_prefetched_high_word = COMPRESSED_ISA && mem_la_firstword && prefetched_high_word && !clear_prefetched_high_word;
+	assign      mem_xfer = (mem_valid && mem_ready) || (mem_la_use_prefetched_high_word && mem_do_rinst);
 
-	wire mem_busy = |{mem_do_prefetch, mem_do_rinst, mem_do_rdata, mem_do_wdata};
-	wire mem_done = resetn && ((mem_xfer && |mem_state && (mem_do_rinst || mem_do_rdata || mem_do_wdata)) || (&mem_state && mem_do_rinst)) &&
-			(!mem_la_firstword || (~&mem_rdata_latched[1:0] && mem_xfer));
+	wire        mem_busy = |{mem_do_prefetch, mem_do_rinst, mem_do_rdata, mem_do_wdata};
+	wire        mem_done = resetn && ((mem_xfer && |mem_state && (mem_do_rinst || mem_do_rdata || mem_do_wdata)) || (&mem_state && mem_do_rinst)) &&
+			               (!mem_la_firstword || (~&mem_rdata_latched[1:0] && mem_xfer));
 
-	assign mem_la_write = resetn && !mem_state && mem_do_wdata;
-	assign mem_la_read = resetn && ((!mem_la_use_prefetched_high_word && !mem_state && (mem_do_rinst || mem_do_prefetch || mem_do_rdata)) ||
-			(COMPRESSED_ISA && mem_xfer && (!last_mem_valid ? mem_la_firstword : mem_la_firstword_reg) && !mem_la_secondword && &mem_rdata_latched[1:0]));
-	assign mem_la_addr = (mem_do_prefetch || mem_do_rinst) ? {next_pc[31:2] + mem_la_firstword_xfer, 2'b00} : {reg_op1[31:2], 2'b00};
+	assign      mem_la_write = resetn && !mem_state && mem_do_wdata;
+	assign      mem_la_read  = resetn && ((!mem_la_use_prefetched_high_word && !mem_state && (mem_do_rinst || mem_do_prefetch || mem_do_rdata)) ||
+			                   (COMPRESSED_ISA && mem_xfer && (!last_mem_valid ? mem_la_firstword : mem_la_firstword_reg) && !mem_la_secondword && &mem_rdata_latched[1:0]));
+	assign      mem_la_addr  = (mem_do_prefetch || mem_do_rinst) ? {next_pc[31:2] + mem_la_firstword_xfer, 2'b00} : {reg_op1[31:2], 2'b00};
 
-	assign mem_rdata_latched_noshuffle = (mem_xfer || LATCHED_MEM_RDATA) ? mem_rdata : mem_rdata_q;
+	assign      mem_rdata_latched_noshuffle = (mem_xfer || LATCHED_MEM_RDATA) ? mem_rdata : mem_rdata_q;
 
-	assign mem_rdata_latched = COMPRESSED_ISA && mem_la_use_prefetched_high_word ? {16'bx, mem_16bit_buffer} :
-			COMPRESSED_ISA && mem_la_secondword ? {mem_rdata_latched_noshuffle[15:0], mem_16bit_buffer} :
-			COMPRESSED_ISA && mem_la_firstword ? {16'bx, mem_rdata_latched_noshuffle[31:16]} : mem_rdata_latched_noshuffle;
+	assign      mem_rdata_latched = COMPRESSED_ISA && mem_la_use_prefetched_high_word ? {16'bx, mem_16bit_buffer} :
+			                        COMPRESSED_ISA && mem_la_secondword ? {mem_rdata_latched_noshuffle[15:0], mem_16bit_buffer} :
+			                        COMPRESSED_ISA && mem_la_firstword ? {16'bx, mem_rdata_latched_noshuffle[31:16]} : mem_rdata_latched_noshuffle;
 
 	always @(posedge clk) begin
 		if (!resetn) begin
+		  `ifdef VECTOR_ENABLE
+		      vcsr_vtype <= {24'b0,1'b0, 1'b0, 3'b010, 3'b000};  // SEW=32 (010), LMUL=1 (000)
+              vcsr_vl    <= VLEN/32;  // 16 elementos por defecto
+		  `endif
 			mem_la_firstword_reg <= 0;
-			last_mem_valid <= 0;
+			last_mem_valid       <= 0;
 		end else begin
 			if (!last_mem_valid)
 				mem_la_firstword_reg <= mem_la_firstword;
@@ -401,12 +593,12 @@ module picorv32 #(
 	always @* begin
 		(* full_case *)
 		case (mem_wordsize)
-			0: begin
-				mem_la_wdata = reg_op2;
-				mem_la_wstrb = 4'b1111;
+			0: begin   //word
+				mem_la_wdata   = reg_op2;
+				mem_la_wstrb   = 4'b1111;
 				mem_rdata_word = mem_rdata;
 			end
-			1: begin
+			1: begin  //half
 				mem_la_wdata = {2{reg_op2[15:0]}};
 				mem_la_wstrb = reg_op1[1] ? 4'b1100 : 4'b0011;
 				case (reg_op1[1])
@@ -414,7 +606,7 @@ module picorv32 #(
 					1'b1: mem_rdata_word = {16'b0, mem_rdata[31:16]};
 				endcase
 			end
-			2: begin
+			2: begin  //byte
 				mem_la_wdata = {4{reg_op2[7:0]}};
 				mem_la_wstrb = 4'b0001 << reg_op1[1:0];
 				case (reg_op1[1:0])
@@ -429,7 +621,7 @@ module picorv32 #(
 
 	always @(posedge clk) begin
 		if (mem_xfer) begin
-			mem_rdata_q <= COMPRESSED_ISA ? mem_rdata_latched : mem_rdata;
+			mem_rdata_q      <= COMPRESSED_ISA ? mem_rdata_latched : mem_rdata;
 			next_insn_opcode <= COMPRESSED_ISA ? mem_rdata_latched : mem_rdata;
 		end
 
@@ -575,7 +767,7 @@ module picorv32 #(
 				mem_addr <= mem_la_addr;
 				mem_wstrb <= mem_la_wstrb & {4{mem_la_write}};
 			end
-			if (mem_la_write) begin
+			if (mem_la_write) begin 
 				mem_wdata <= mem_la_wdata;
 			end
 			case (mem_state)
@@ -642,7 +834,62 @@ module picorv32 #(
 
 
 	// Instruction Decoder
+	
+`ifdef VECTOR_ENABLE
 
+    reg instr_vsetvli;  // Configuración
+    reg instr_vle, instr_vse;         // Load/Store
+    
+    // Operaciones aritméticas y lógicas
+    reg instr_vadd;                   // Add
+    reg instr_vsub;                   // Sub
+    reg instr_vadc;                   // Add with carry
+    reg instr_vsbc;                   // Sub with borrow
+    reg instr_vminu;                  // Unsigned minimum
+    reg instr_vmaxu;                  // Unsigned maximum
+    reg instr_vand;                   // Logical AND
+    reg instr_vor;                    // Logical OR  
+    reg instr_vxor;                   // Logical XOR
+    
+    // Operaciones de comparación
+    reg instr_vmseq;                  // Set if equal
+    reg instr_vmsne;                  // Set if not equal
+    reg instr_vmsltu;                 // Set if less than unsigned
+    reg instr_vmslt;                  // Set if less than signed
+    reg instr_vmsleu;                 // Set if less than or equal unsigned
+    reg instr_vmsle;                  // Set if less than or equal signed
+    
+    // Operaciones de desplazamiento
+    reg instr_vsll;                   // Shift left logical
+    reg instr_vsrl;                   // Shift right logical
+    reg instr_vsra;                   // Shift right arithmetic
+    
+    // Registros vectoriales
+    //reg [4:0] decoded_vs1, decoded_vs2, decoded_vd;
+    //reg [10:0] decoded_vimm;
+    
+    // Señales de formato
+    
+    reg is_vec_arth;   // Es operación aritmética vectorial
+    reg is_vec_load;   // Es load vectorial
+    reg is_vec_store;  // Es store vectorial
+    reg is_vec_cfg;    // Es configuración vectorial
+    reg is_vsetimm;
+
+    reg is_vec_vv;     // Vector-Vector
+    reg is_vec_vx;     // Vector-Scalar
+    reg is_vec_vi;     // Vector-Immediate
+    
+    // Señales de control
+    major_opcodes_t vector_opcode;
+    vfunct3_t vfunc3;
+    vfunct6_t vfunc6;
+    reg [31:0] v_imm;
+    reg [10:0] vtype;
+    reg vill;
+`endif
+
+    reg is_vec_instr = 0;   // Es instrucción vectorial
 	reg instr_lui, instr_auipc, instr_jal, instr_jalr;
 	reg instr_beq, instr_bne, instr_blt, instr_bge, instr_bltu, instr_bgeu;
 	reg instr_lb, instr_lh, instr_lw, instr_lbu, instr_lhu, instr_sb, instr_sh, instr_sw;
@@ -676,8 +923,9 @@ module picorv32 #(
 	reg is_alu_reg_reg;
 	reg is_compare;
 
-	assign instr_trap = (CATCH_ILLINSN || WITH_PCPI) && !{instr_lui, instr_auipc, instr_jal, instr_jalr,
-			instr_beq, instr_bne, instr_blt, instr_bge, instr_bltu, instr_bgeu,
+	assign instr_trap = (CATCH_ILLINSN || WITH_PCPI) && !{
+            instr_lui, instr_auipc, instr_jal, instr_jalr,
+            instr_beq, instr_bne, instr_blt, instr_bge, instr_bltu, instr_bgeu,
 			instr_lb, instr_lh, instr_lw, instr_lbu, instr_lhu, instr_sb, instr_sh, instr_sw,
 			instr_addi, instr_slti, instr_sltiu, instr_xori, instr_ori, instr_andi, instr_slli, instr_srli, instr_srai,
 			instr_add, instr_sub, instr_sll, instr_slt, instr_sltu, instr_xor, instr_srl, instr_sra, instr_or, instr_and,
@@ -690,9 +938,9 @@ module picorv32 #(
 	reg [63:0] new_ascii_instr;
 	`FORMAL_KEEP reg [63:0] dbg_ascii_instr;
 	`FORMAL_KEEP reg [31:0] dbg_insn_imm;
-	`FORMAL_KEEP reg [4:0] dbg_insn_rs1;
-	`FORMAL_KEEP reg [4:0] dbg_insn_rs2;
-	`FORMAL_KEEP reg [4:0] dbg_insn_rd;
+	`FORMAL_KEEP reg [4:0]  dbg_insn_rs1;
+	`FORMAL_KEEP reg [4:0]  dbg_insn_rs2;
+	`FORMAL_KEEP reg [4:0]  dbg_insn_rd;
 	`FORMAL_KEEP reg [31:0] dbg_rs1val;
 	`FORMAL_KEEP reg [31:0] dbg_rs2val;
 	`FORMAL_KEEP reg dbg_rs1val_valid;
@@ -755,14 +1003,51 @@ module picorv32 #(
 		if (instr_maskirq)  new_ascii_instr = "maskirq";
 		if (instr_waitirq)  new_ascii_instr = "waitirq";
 		if (instr_timer)    new_ascii_instr = "timer";
+		
+		`ifdef VECTOR_ENABLE
+        // Vector Arithmetic Instructions
+        if (instr_vadd) new_ascii_instr = "vadd";
+        if (instr_vsub) new_ascii_instr = "vsub";
+        if (instr_vadc) new_ascii_instr = "vadc";
+        if (instr_vsbc) new_ascii_instr = "vsbc";
+        
+        // Vector Min/Max Instructions
+        if (instr_vminu) new_ascii_instr = "vminu";
+        if (instr_vmaxu) new_ascii_instr = "vmaxu";
+        
+        // Vector Logic Instructions
+        if (instr_vand) new_ascii_instr = "vand";
+        if (instr_vor)  new_ascii_instr = "vor";
+        if (instr_vxor) new_ascii_instr = "vxor";
+        
+        // Vector Compare Instructions
+        if (instr_vmseq)  new_ascii_instr = "vmseq";
+        if (instr_vmsne)  new_ascii_instr = "vmsne";
+        if (instr_vmsltu) new_ascii_instr = "vmsltu";
+        if (instr_vmslt)  new_ascii_instr = "vmslt";
+        if (instr_vmsleu) new_ascii_instr = "vmsleu";
+        if (instr_vmsle)  new_ascii_instr = "vmsle";
+        
+        // Vector Shift Instructions
+        if (instr_vsll) new_ascii_instr = "vsll";
+        if (instr_vsrl) new_ascii_instr = "vsrl";
+        if (instr_vsra) new_ascii_instr = "vsra";
+        
+        // Vector Load/Store Instructions
+        if (instr_vle) new_ascii_instr = "vle";
+        if (instr_vse) new_ascii_instr = "vse";
+        
+        // Vector Configuration Instructions
+        if (instr_vsetvli) new_ascii_instr = "vsetvli";
+    `endif
 	end
 
 	reg [63:0] q_ascii_instr;
 	reg [31:0] q_insn_imm;
 	reg [31:0] q_insn_opcode;
-	reg [4:0] q_insn_rs1;
-	reg [4:0] q_insn_rs2;
-	reg [4:0] q_insn_rd;
+	reg [4:0]  q_insn_rs1;
+	reg [4:0]  q_insn_rs2;
+	reg [4:0]  q_insn_rd;
 	reg dbg_next;
 
 	wire launch_next_insn;
@@ -771,18 +1056,18 @@ module picorv32 #(
 	reg [63:0] cached_ascii_instr;
 	reg [31:0] cached_insn_imm;
 	reg [31:0] cached_insn_opcode;
-	reg [4:0] cached_insn_rs1;
-	reg [4:0] cached_insn_rs2;
-	reg [4:0] cached_insn_rd;
+	reg [4:0]  cached_insn_rs1;
+	reg [4:0]  cached_insn_rs2;
+	reg [4:0]  cached_insn_rd;
 
 	always @(posedge clk) begin
 		q_ascii_instr <= dbg_ascii_instr;
-		q_insn_imm <= dbg_insn_imm;
+		q_insn_imm    <= dbg_insn_imm;
 		q_insn_opcode <= dbg_insn_opcode;
-		q_insn_rs1 <= dbg_insn_rs1;
-		q_insn_rs2 <= dbg_insn_rs2;
-		q_insn_rd <= dbg_insn_rd;
-		dbg_next <= launch_next_insn;
+		q_insn_rs1    <= dbg_insn_rs1;
+		q_insn_rs2    <= dbg_insn_rs2;
+		q_insn_rd     <= dbg_insn_rd;
+		dbg_next      <= launch_next_insn;
 
 		if (!resetn || trap)
 			dbg_valid_insn <= 0;
@@ -808,20 +1093,20 @@ module picorv32 #(
 
 	always @* begin
 		dbg_ascii_instr = q_ascii_instr;
-		dbg_insn_imm = q_insn_imm;
+		dbg_insn_imm    = q_insn_imm;
 		dbg_insn_opcode = q_insn_opcode;
-		dbg_insn_rs1 = q_insn_rs1;
-		dbg_insn_rs2 = q_insn_rs2;
-		dbg_insn_rd = q_insn_rd;
+		dbg_insn_rs1    = q_insn_rs1;
+		dbg_insn_rs2    = q_insn_rs2;
+		dbg_insn_rd     = q_insn_rd;
 
 		if (dbg_next) begin
 			if (decoder_pseudo_trigger_q) begin
 				dbg_ascii_instr = cached_ascii_instr;
-				dbg_insn_imm = cached_insn_imm;
+				dbg_insn_imm    = cached_insn_imm;
 				dbg_insn_opcode = cached_insn_opcode;
-				dbg_insn_rs1 = cached_insn_rs1;
-				dbg_insn_rs2 = cached_insn_rs2;
-				dbg_insn_rd = cached_insn_rd;
+				dbg_insn_rs1    = cached_insn_rs1;
+				dbg_insn_rs2    = cached_insn_rs2;
+				dbg_insn_rd     = cached_insn_rd;
 			end else begin
 				dbg_ascii_instr = new_ascii_instr;
 				if (&next_insn_opcode[1:0])
@@ -831,7 +1116,7 @@ module picorv32 #(
 				dbg_insn_imm = decoded_imm;
 				dbg_insn_rs1 = decoded_rs1;
 				dbg_insn_rs2 = decoded_rs2;
-				dbg_insn_rd = decoded_rd;
+				dbg_insn_rd  = decoded_rd;
 			end
 		end
 	end
@@ -856,14 +1141,37 @@ module picorv32 #(
 `endif
 
 	always @(posedge clk) begin
-		is_lui_auipc_jal <= |{instr_lui, instr_auipc, instr_jal};
+		is_lui_auipc_jal                   <= |{instr_lui, instr_auipc, instr_jal};
 		is_lui_auipc_jal_jalr_addi_add_sub <= |{instr_lui, instr_auipc, instr_jal, instr_jalr, instr_addi, instr_add, instr_sub};
-		is_slti_blt_slt <= |{instr_slti, instr_blt, instr_slt};
-		is_sltiu_bltu_sltu <= |{instr_sltiu, instr_bltu, instr_sltu};
-		is_lbu_lhu_lw <= |{instr_lbu, instr_lhu, instr_lw};
-		is_compare <= |{is_beq_bne_blt_bge_bltu_bgeu, instr_slti, instr_slt, instr_sltiu, instr_sltu};
+		is_slti_blt_slt                    <= |{instr_slti, instr_blt, instr_slt};
+		is_sltiu_bltu_sltu                 <= |{instr_sltiu, instr_bltu, instr_sltu};
+		is_lbu_lhu_lw                      <= |{instr_lbu, instr_lhu, instr_lw};
+		is_compare                         <= |{is_beq_bne_blt_bge_bltu_bgeu, instr_slti, instr_slt, instr_sltiu, instr_sltu};
+		`ifdef VECTOR_ENABLE
+		    is_vec_instr  <= |{vector_opcode == OP_V, vector_opcode == LOAD_FP, vector_opcode == STORE_FP};
+            is_vec_arth   <= vector_opcode == OP_V && vfunc3 != OPCFG;
+            is_vec_load   <= vector_opcode == LOAD_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[28:26] == 3'b000;
+            is_vec_store  <= vector_opcode == STORE_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[28:26] == 3'b000;
+            is_vec_cfg    <= vector_opcode == OP_V && vfunc3 == OPCFG;
+            is_vsetimm    <= vector_opcode == OP_V && vfunc3 == OPCFG && mem_rdata_latched[31] == 0;
+              
+            is_vec_vv     <= vfunc3 == OPIVV;  // Vector-Vector
+            is_vec_vx     <= vfunc3 == OPIVX;  // Vector-Scalar
+            is_vec_vi     <= vfunc3 == OPIVI;  // Vector-Immediate
+          `elsif is_vec_inst <= 0;
+		`endif
 
 		if (mem_do_rinst && mem_done) begin
+		
+		  `ifdef VECTOR_ENABLE
+		      vfunc3        <= vfunct3_t'(mem_rdata_latched[14:12]);
+		      vector_opcode <= major_opcodes_t'(mem_rdata_latched[6:0]);
+		      vm            <= /*1'b1;*/ mem_rdata_latched[25];      // Vector mask
+              vfunc6        <= vfunct6_t'(mem_rdata_latched[31:26]); // Func6 para identificar operación
+              v_imm         <= $signed({{27{mem_rdata_q[19]}}, mem_rdata_q[19:15]});
+              vtype         <= mem_rdata_latched[30:20];
+          `endif
+		
 			instr_lui     <= mem_rdata_latched[6:0] == 7'b0110111;
 			instr_auipc   <= mem_rdata_latched[6:0] == 7'b0010111;
 			instr_jal     <= mem_rdata_latched[6:0] == 7'b1101111;
@@ -879,7 +1187,7 @@ module picorv32 #(
 
 			{ decoded_imm_j[31:20], decoded_imm_j[10:1], decoded_imm_j[11], decoded_imm_j[19:12], decoded_imm_j[0] } <= $signed({mem_rdata_latched[31:12], 1'b0});
 
-			decoded_rd <= mem_rdata_latched[11:7];
+			decoded_rd  <= mem_rdata_latched[11:7];
 			decoded_rs1 <= mem_rdata_latched[19:15];
 			decoded_rs2 <= mem_rdata_latched[24:20];
 
@@ -1036,6 +1344,11 @@ module picorv32 #(
 
 		if (decoder_trigger && !decoder_pseudo_trigger) begin
 			pcpi_insn <= WITH_PCPI ? mem_rdata_q : 'bx;
+			
+		`ifdef VECTOR_ENABLE
+	        pcpi_vec_insn <= ENABLE_VEC ? mem_rdata_q : 'bx;
+	        instr_vsetvli <= is_vec_cfg && !mem_rdata_q[31]; // vsetvli cuando el bit 31 es 0
+        `endif
 
 			instr_beq   <= is_beq_bne_blt_bge_bltu_bgeu && mem_rdata_q[14:12] == 3'b000;
 			instr_bne   <= is_beq_bne_blt_bge_bltu_bgeu && mem_rdata_q[14:12] == 3'b001;
@@ -1136,6 +1449,11 @@ module picorv32 #(
 		if (!resetn) begin
 			is_beq_bne_blt_bge_bltu_bgeu <= 0;
 			is_compare <= 0;
+			
+        `ifdef VECTOR_ENABLE
+            // Reset vector instruction flags
+            instr_vsetvli <= 0;
+        `endif
 
 			instr_beq   <= 0;
 			instr_bne   <= 0;
@@ -1178,6 +1496,7 @@ module picorv32 #(
 	localparam cpu_state_stmem  = 8'b00000010;
 	localparam cpu_state_ldmem  = 8'b00000001;
 
+
 	reg [7:0] cpu_state;
 	reg [1:0] irq_state;
 
@@ -1193,6 +1512,7 @@ module picorv32 #(
 		if (cpu_state == cpu_state_shift)  dbg_ascii_state = "shift";
 		if (cpu_state == cpu_state_stmem)  dbg_ascii_state = "stmem";
 		if (cpu_state == cpu_state_ldmem)  dbg_ascii_state = "ldmem";
+
 	end
 
 	reg set_mem_do_rinst;
@@ -1208,6 +1528,14 @@ module picorv32 #(
 	reg latched_is_lh;
 	reg latched_is_lb;
 	reg [regindex_bits-1:0] latched_rd;
+	
+	`ifdef VECTOR_ENABLE 
+	  reg            latched_vstore;
+	  //reg [4     :0] latched_vd;
+	  reg            vregs_write;
+	  reg [VLEN-1:0] vregs_wdata;
+	  //reg [VLEN-1:0] vreg_result;
+	`endif
 
 	reg [31:0] current_pc;
 	assign next_pc = latched_store && latched_branch ? reg_out & ~1 : reg_next_pc;
@@ -1225,24 +1553,33 @@ module picorv32 #(
 	reg [31:0] alu_add_sub;
 	reg [31:0] alu_shl, alu_shr;
 	reg alu_eq, alu_ltu, alu_lts;
+`ifdef VECTOR_ENABLE
+    reg [31:0] alu_vl;
+`endif
 
 	generate if (TWO_CYCLE_ALU) begin
 		always @(posedge clk) begin
 			alu_add_sub <= instr_sub ? reg_op1 - reg_op2 : reg_op1 + reg_op2;
-			alu_eq <= reg_op1 == reg_op2;
+			alu_eq  <= reg_op1 == reg_op2;
 			alu_lts <= $signed(reg_op1) < $signed(reg_op2);
 			alu_ltu <= reg_op1 < reg_op2;
 			alu_shl <= reg_op1 << reg_op2[4:0];
 			alu_shr <= $signed({instr_sra || instr_srai ? reg_op1[31] : 1'b0, reg_op1}) >>> reg_op2[4:0];
+		`ifdef VECTOR_ENABLE
+		    alu_vl <= reg_op2 / reg_op1;
+		`endif
 		end
 	end else begin
 		always @* begin
 			alu_add_sub = instr_sub ? reg_op1 - reg_op2 : reg_op1 + reg_op2;
-			alu_eq = reg_op1 == reg_op2;
+			alu_eq  = reg_op1 == reg_op2;
 			alu_lts = $signed(reg_op1) < $signed(reg_op2);
 			alu_ltu = reg_op1 < reg_op2;
 			alu_shl = reg_op1 << reg_op2[4:0];
 			alu_shr = $signed({instr_sra || instr_srai ? reg_op1[31] : 1'b0, reg_op1}) >>> reg_op2[4:0];
+		`ifdef VECTOR_ENABLE
+		    alu_vl  = reg_op2 / reg_op1;
+		`endif
 		end
 	end endgenerate
 
@@ -1281,6 +1618,12 @@ module picorv32 #(
 				alu_out = alu_shl;
 			BARREL_SHIFTER && (instr_srl || instr_srli || instr_sra || instr_srai):
 				alu_out = alu_shr;
+			`ifdef VECTOR_ENABLE
+                (instr_vsetvli): begin
+                    alu_out = alu_vl;
+                    //vcsr_vl = alu_vl;
+                end
+            `endif
 		endcase
 
 `ifdef RISCV_FORMAL_BLACKBOX_ALU
@@ -1300,14 +1643,20 @@ module picorv32 #(
 			clear_prefetched_high_word = COMPRESSED_ISA;
 	end
 
+    // Bloque que controla la escritura de registros 
 	reg cpuregs_write;
 	reg [31:0] cpuregs_wrdata;
 	reg [31:0] cpuregs_rs1;
 	reg [31:0] cpuregs_rs2;
 	reg [regindex_bits-1:0] decoded_rs;
-
-	always @* begin
-		cpuregs_write = 0;
+	
+	always @* begin // ESTE BLOQUE CONTROLA LA BANDERA DE ESCRITURA Y EL VALOR A ESCRIBIR
+	
+    `ifdef VECTOR_ENABLE
+        vregs_write     = 0;
+        vregs_wdata     = 'bx;
+    `endif
+		cpuregs_write  = 0;
 		cpuregs_wrdata = 'bx;
 
 		if (cpu_state == cpu_state_fetch) begin
@@ -1315,53 +1664,115 @@ module picorv32 #(
 			case (1'b1)
 				latched_branch: begin
 					cpuregs_wrdata = reg_pc + (latched_compr ? 2 : 4);
-					cpuregs_write = 1;
+					cpuregs_write  = 1;
 				end
 				latched_store && !latched_branch: begin
 					cpuregs_wrdata = latched_stalu ? alu_out_q : reg_out;
-					cpuregs_write = 1;
+					cpuregs_write  = 1;
 				end
+	        `ifdef VECTOR_ENABLE
+		        latched_vstore && !latched_branch: begin
+                    vregs_wdata = vreg_out;     // Resultado vectorial
+                    vregs_write = 1;
+                end
+            `endif 
 				ENABLE_IRQ && irq_state[0]: begin
 					cpuregs_wrdata = reg_next_pc | latched_compr;
-					cpuregs_write = 1;
+					cpuregs_write  = 1;
 				end
 				ENABLE_IRQ && irq_state[1]: begin
 					cpuregs_wrdata = irq_pending & ~irq_mask;
-					cpuregs_write = 1;
+					cpuregs_write  = 1;
 				end
 			endcase
 		end
 	end
+	
+	`ifdef VECTOR_ENABLE
+    // Registros temporales para operandos vectoriales
+    reg [VLEN-1:0] vpuregs_vs1;
+    reg [VLEN-1:0] vpuregs_vs2;
+    
+    // Bloque de escritura de registros vectoriales
+    always @(posedge clk) begin
+        if (resetn && vregs_write && latched_rd) begin
+            if (vm) begin // Sin enmascaramiento (vm=1)
+                vregs[latched_rd] <= vregs_wdata;
+            end else begin
+                // Escritura selectiva usando v0 (vregs[0]) como máscara según SEW
+                case (vsew)
+                    SEW8: begin // SEW = 8 bits
+                        for (int i = 0; i < VLEN/8; i = i + 1) begin
+                            // Usar el bit i-ésimo de vregs[0] como máscara
+                            if (vregs[0][i])
+                                vregs[latched_rd][i*8 +: 8] <= vregs_wdata[i*8 +: 8];
+                        end
+                    end
+                    SEW16: begin // SEW = 16 bits
+                        for (int i = 0; i < VLEN/16; i = i + 1) begin
+                            // Usar el bit i-ésimo de vregs[0] como máscara
+                            if (vregs[0][i])
+                                vregs[latched_rd][i*16 +: 16] <= vregs_wdata[i*16 +: 16];
+                        end
+                    end
+                    SEW32: begin // SEW = 32 bits
+                        for (int i = 0; i < VLEN/32; i = i + 1) begin
+                            // Usar el bit i-ésimo de vregs[0] como máscara
+                            if (vregs[0][i])
+                                vregs[latched_rd][i*32 +: 32] <= vregs_wdata[i*32 +: 32];
+                        end
+                    end
+                    default: begin
+                        // Caso por defecto (podría ser SEW64 si se agrega soporte)
+                    end
+                endcase
+            end
+        end
+    end
+
+
+    // Bloque de lectura de registros vectoriales
+    always @* begin
+        // Valores por defecto
+        //vpuregs_vs1 = 'bx;
+        //vpuregs_vs2 = 'bx;
+
+        // Leer operandos vectoriales 
+        vpuregs_vs1 = decoded_rs1 ? vregs[decoded_rs1] : 0;
+        vpuregs_vs2 = decoded_rs2 ? vregs[decoded_rs2] : 0;
+
+    end
+`endif
 
 `ifndef PICORV32_REGS
 	always @(posedge clk) begin
 		if (resetn && cpuregs_write && latched_rd)
-`ifdef PICORV32_TESTBUG_001
-			cpuregs[latched_rd ^ 1] <= cpuregs_wrdata;
-`elsif PICORV32_TESTBUG_002
-			cpuregs[latched_rd] <= cpuregs_wrdata ^ 1;
-`else
-			cpuregs[latched_rd] <= cpuregs_wrdata;
-`endif
+    `ifdef PICORV32_TESTBUG_001                            // IGNORAR
+			cpuregs[latched_rd ^ 1] <= cpuregs_wrdata;     // IGNORAR
+    `elsif PICORV32_TESTBUG_002                            // IGNORAR
+			cpuregs[latched_rd] <= cpuregs_wrdata ^ 1;     // IGNORAR
+    `else
+			cpuregs[latched_rd] <= cpuregs_wrdata;         // AQUÍ SE ESCRIBE EN EL REGISTRO DE LA CPU
+    `endif
 	end
 
 	always @* begin
 		decoded_rs = 'bx;
 		if (ENABLE_REGS_DUALPORT) begin
-`ifndef RISCV_FORMAL_BLACKBOX_REGS
+    `ifndef RISCV_FORMAL_BLACKBOX_REGS
 			cpuregs_rs1 = decoded_rs1 ? cpuregs[decoded_rs1] : 0;
 			cpuregs_rs2 = decoded_rs2 ? cpuregs[decoded_rs2] : 0;
-`else
+    `else
 			cpuregs_rs1 = decoded_rs1 ? $anyseq : 0;
 			cpuregs_rs2 = decoded_rs2 ? $anyseq : 0;
-`endif
+    `endif
 		end else begin
 			decoded_rs = (cpu_state == cpu_state_ld_rs2) ? decoded_rs2 : decoded_rs1;
-`ifndef RISCV_FORMAL_BLACKBOX_REGS
+    `ifndef RISCV_FORMAL_BLACKBOX_REGS
 			cpuregs_rs1 = decoded_rs ? cpuregs[decoded_rs] : 0;
-`else
+    `else
 			cpuregs_rs1 = decoded_rs ? $anyseq : 0;
-`endif
+    `endif
 			cpuregs_rs2 = cpuregs_rs1;
 		end
 	end
@@ -1443,13 +1854,13 @@ module picorv32 #(
 			timer <= timer - 1;
 		end
 
-		decoder_trigger <= mem_do_rinst && mem_done;
-		decoder_trigger_q <= decoder_trigger;
-		decoder_pseudo_trigger <= 0;
+		decoder_trigger          <= mem_do_rinst && mem_done;
+		decoder_trigger_q        <= decoder_trigger;
+		decoder_pseudo_trigger   <= 0;
 		decoder_pseudo_trigger_q <= decoder_pseudo_trigger;
-		do_waitirq <= 0;
+		do_waitirq               <= 0;
 
-		trace_valid <= 0;
+		trace_valid              <= 0;
 
 		if (!ENABLE_TRACE)
 			trace_data <= 'bx;
@@ -1459,22 +1870,25 @@ module picorv32 #(
 			reg_next_pc <= PROGADDR_RESET;
 			if (ENABLE_COUNTERS)
 				count_instr <= 0;
-			latched_store <= 0;
-			latched_stalu <= 0;
+			latched_store  <= 0;
+			latched_stalu  <= 0;
 			latched_branch <= 0;
-			latched_trace <= 0;
-			latched_is_lu <= 0;
-			latched_is_lh <= 0;
-			latched_is_lb <= 0;
-			pcpi_valid <= 0;
+			latched_trace  <= 0;
+			latched_is_lu  <= 0;
+			latched_is_lh  <= 0;
+			latched_is_lb  <= 0;
+			pcpi_valid     <= 0;
+			`ifdef VECTOR_ENABLE
+			  pcpi_vec_valid <= 0;
+			`endif 
 			pcpi_timeout <= 0;
-			irq_active <= 0;
-			irq_delay <= 0;
-			irq_mask <= ~0;
+			irq_active   <= 0;
+			irq_delay    <= 0;
+			irq_mask     <= ~0;
 			next_irq_pending = 0;
-			irq_state <= 0;
-			eoi <= 0;
-			timer <= 0;
+			irq_state    <= 0;
+			eoi          <= 0;
+			timer        <= 0;
 			if (~STACKADDR) begin
 				latched_store <= 1;
 				latched_rd <= 2;
@@ -1489,6 +1903,7 @@ module picorv32 #(
 			end
 
 			cpu_state_fetch: begin
+			
 				mem_do_rinst <= !decoder_trigger && !do_waitirq;
 				mem_wordsize <= 0;
 
@@ -1523,17 +1938,20 @@ module picorv32 #(
 						trace_data <= (irq_active ? TRACE_IRQ : 0) | (latched_stalu ? alu_out_q : reg_out);
 				end
 
-				reg_pc <= current_pc;
-				reg_next_pc <= current_pc;
+				reg_pc         <= current_pc;
+				reg_next_pc    <= current_pc;
 
-				latched_store <= 0;
-				latched_stalu <= 0;
+				latched_store  <= 0;
+            `ifdef VECTOR_ENABLE 
+				latched_vstore <= 0;
+			`endif
+				latched_stalu  <= 0;
 				latched_branch <= 0;
-				latched_is_lu <= 0;
-				latched_is_lh <= 0;
-				latched_is_lb <= 0;
-				latched_rd <= decoded_rd;
-				latched_compr <= compressed_instr;
+				latched_is_lu  <= 0;
+				latched_is_lh  <= 0;
+				latched_is_lb  <= 0;
+				latched_rd     <= decoded_rd;
+				latched_compr  <= compressed_instr;
 
 				if (ENABLE_IRQ && ((decoder_trigger && !irq_active && !irq_delay && |(irq_pending & ~irq_mask)) || irq_state)) begin
 					irq_state <=
@@ -1550,7 +1968,8 @@ module picorv32 #(
 						latched_store <= 1;
 						reg_out <= irq_pending;
 						reg_next_pc <= current_pc + (compressed_instr ? 2 : 4);
-						mem_do_rinst <= 1;
+			
+                            // Interfaz de memoria para operaciones de			mem_do_rinst <= 1;
 					end else
 						do_waitirq <= 1;
 				end else
@@ -1568,7 +1987,8 @@ module picorv32 #(
 						mem_do_rinst <= 1;
 						reg_next_pc <= current_pc + decoded_imm_j;
 						latched_branch <= 1;
-					end else begin
+				    end
+					else begin
 						mem_do_rinst <= 0;
 						mem_do_prefetch <= !instr_jalr && !instr_retirq;
 						cpu_state <= cpu_state_ld_rs1;
@@ -1577,30 +1997,50 @@ module picorv32 #(
 			end
 
 			cpu_state_ld_rs1: begin
+            
 				reg_op1 <= 'bx;
 				reg_op2 <= 'bx;
+				
+				`ifdef VECTOR_ENABLE
+				  vreg_pcpi_op1  <= 'bx;
+				  vreg_pcpi_op2  <= 'bx;
+			
+                      // Interfaz de memoria para operaciones de	  vreg_op2 <= 'bx;
+				`endif
 
 				(* parallel_case *)
 				case (1'b1)
 					(CATCH_ILLINSN || WITH_PCPI) && instr_trap: begin
-						if (WITH_PCPI) begin
+						if (WITH_PCPI && (!is_vec_instr/* || instr_vsetvli*/)) begin
 							`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-							reg_op1 <= cpuregs_rs1;
-							dbg_rs1val <= cpuregs_rs1;
+							
+						/*`ifdef VECTOR_ENABLE
+						    if (instr_vsetvli) begin
+                                vsew       <= sew_t'(vtype[5:3]);
+                                vcsr_vtype <= {24'b0,1'b0,1'b0,vtype[5:3],3'b000};
+                                vcsr_vl    <= VLEN / (4*(2 << vtype[5:3]));
+                                SEW        <= 4*(2 << vtype[5:3]);
+                                reg_op1    <= 4*(2 << vtype[5:3]);  // Valor vl solicitado (rs1)
+                                reg_op2    <= VLEN;
+                            end
+						`endif*/
+							
+							reg_op1          <= cpuregs_rs1;
+							dbg_rs1val       <= cpuregs_rs1;
 							dbg_rs1val_valid <= 1;
 							if (ENABLE_REGS_DUALPORT) begin
 								pcpi_valid <= 1;
 								`debug($display("LD_RS2: %2d 0x%08x", decoded_rs2, cpuregs_rs2);)
-								reg_sh <= cpuregs_rs2;
-								reg_op2 <= cpuregs_rs2;
-								dbg_rs2val <= cpuregs_rs2;
+								reg_sh           <= cpuregs_rs2;
+								reg_op2          <= cpuregs_rs2;
+								dbg_rs2val       <= cpuregs_rs2;
 								dbg_rs2val_valid <= 1;
 								if (pcpi_int_ready) begin
-									mem_do_rinst <= 1;
-									pcpi_valid <= 0;
-									reg_out <= pcpi_int_rd;
+									mem_do_rinst  <= 1;
+									pcpi_valid    <= 0;
+									reg_out       <= pcpi_int_rd;
 									latched_store <= pcpi_int_wr;
-									cpu_state <= cpu_state_fetch;
+			                        cpu_state     <= cpu_state_fetch;
 								end else
 								if (CATCH_ILLINSN && (pcpi_timeout || instr_ecall_ebreak)) begin
 									pcpi_valid <= 0;
@@ -1614,7 +2054,86 @@ module picorv32 #(
 							end else begin
 								cpu_state <= cpu_state_ld_rs2;
 							end
-						end else begin
+						end 
+						`ifdef VECTOR_ENABLE
+						else if (WITH_PCPI && is_vec_instr) begin
+						    case (vfunc3)
+                                OPIVV: begin // Vector-Vector
+                                    vreg_pcpi_op1  <= vpuregs_vs1;
+                                    vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
+                                    pcpi_vec_valid <= 1;
+                                    //pcpi_vec_insn <= pcpi_insn;
+                                end
+                                OPIVX: begin // Vector-Scalar
+                                    // Convertir el escalar a un vector donde cada elemento es el valor escalar
+                                    case (vsew)
+                                        SEW8: for (integer i = 0; i < VLEN/8; i=i+1)
+                                            vreg_pcpi_op1[i*8 +: 8] <= cpuregs_rs1[7:0];
+                                        SEW16: for (integer i = 0; i < VLEN/16; i=i+1)
+                                            vreg_pcpi_op1[i*16 +: 16] <= cpuregs_rs1[15:0];
+                                        SEW32: for (integer i = 0; i < VLEN/32; i=i+1)
+                                            vreg_pcpi_op1[i*32 +: 32] <= cpuregs_rs1;
+                                        default: vreg_pcpi_op1 <= 'bx;
+                                    endcase
+                                    vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
+                                    pcpi_vec_valid <= 1;
+                                end 
+                                OPIVI: begin // Vector-Immediate   
+                                    case (vsew)
+                                        SEW8: begin
+                                            for (integer i = 0; i < VLEN/8; i=i+1)
+                                                vreg_pcpi_op1[i*8 +: 8] <= v_imm[7:0];
+                                        end
+                                        SEW16: begin
+                                            for (integer i = 0; i < VLEN/16; i=i+1)
+                                                vreg_pcpi_op1[i*16 +: 16] <= v_imm[15:0];
+                                        end
+                                        SEW32: begin
+                                            for (integer i = 0; i < VLEN/32; i=i+1)
+                                                vreg_pcpi_op1[i*32 +: 32] <= v_imm;
+                                        end
+                                        default: begin
+                                            vreg_pcpi_op1 <= 'bx;
+                                        end
+                                    endcase
+                                    vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
+                                    pcpi_vec_valid <= 1;
+                                end
+                                OPCFG: begin // Instrucción de configuración
+                                    // Cargar los registros necesarios (para vsetvli)
+                                    pcpi_valid <= 1;
+                                    vsew       <= sew_t'(vtype[5:3]);
+                                    vcsr_vtype <= {24'b0,1'b0,1'b0,vtype[5:3],3'b000};
+                                    vcsr_vl    <= VLEN / (4*(2 << vtype[5:3]));
+                                    SEW        <= 8 << vtype[5:3];
+                                    reg_op1    <= VLEN;  // Valor vl solicitado (rs1)
+                                    reg_op2    <= 8 << vtype[5:3];
+                                    
+                                    // Avanzar al estado exec para realizar la configuración
+                                    if (pcpi_int_ready) begin
+                                        mem_do_rinst  <= 1;
+                                        pcpi_valid    <= 0;
+                                        reg_out       <= pcpi_int_rd;
+                                        latched_store <= pcpi_int_wr;
+                                        cpu_state     <= cpu_state_fetch;
+                                    end
+                                end 
+                                default: begin
+                                    vreg_pcpi_op1 <= 'bx;
+                                    vreg_pcpi_op2 <= 'bx;
+                                end
+                            endcase 
+						    
+						    if (pcpi_int_ready) begin
+                                mem_do_rinst   <= 1;
+                                pcpi_vec_valid <= 0;
+                                vreg_out       <= pcpi_int_vd;
+                                latched_vstore <= pcpi_int_wr;
+                                cpu_state      <= cpu_state_fetch;
+						    end
+						end 
+						`endif
+						else begin
 							`debug($display("EBREAK OR UNSUPPORTED INSN AT 0x%08x", reg_pc);)
 							if (ENABLE_IRQ && !irq_mask[irq_ebreak] && !irq_active) begin
 								next_irq_pending[irq_ebreak] = 1;
@@ -1695,7 +2214,7 @@ module picorv32 #(
 					end
 					is_lb_lh_lw_lbu_lhu && !instr_trap: begin
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						reg_op1 <= cpuregs_rs1;
+						reg_op1    <= cpuregs_rs1;
 						dbg_rs1val <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
 						cpu_state <= cpu_state_ldmem;
@@ -1711,7 +2230,7 @@ module picorv32 #(
 					end
 					is_jalr_addi_slti_sltiu_xori_ori_andi, is_slli_srli_srai && BARREL_SHIFTER: begin
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						reg_op1 <= cpuregs_rs1;
+						reg_op1    <= cpuregs_rs1;
 						dbg_rs1val <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
 						reg_op2 <= is_slli_srli_srai && BARREL_SHIFTER ? decoded_rs2 : decoded_imm;
@@ -1757,6 +2276,7 @@ module picorv32 #(
 			end
 
 			cpu_state_ld_rs2: begin
+			
 				`debug($display("LD_RS2: %2d 0x%08x", decoded_rs2, cpuregs_rs2);)
 				reg_sh <= cpuregs_rs2;
 				reg_op2 <= cpuregs_rs2;
@@ -1803,35 +2323,36 @@ module picorv32 #(
 			end
 
 			cpu_state_exec: begin
-				reg_out <= reg_pc + decoded_imm;
-				if ((TWO_CYCLE_ALU || TWO_CYCLE_COMPARE) && (alu_wait || alu_wait_2)) begin
-					mem_do_rinst <= mem_do_prefetch && !alu_wait_2;
-					alu_wait <= alu_wait_2;
-				end else
-				if (is_beq_bne_blt_bge_bltu_bgeu) begin
-					latched_rd <= 0;
-					latched_store <= TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0;
-					latched_branch <= TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0;
-					if (mem_done)
-						cpu_state <= cpu_state_fetch;
-					if (TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0) begin
-						decoder_trigger <= 0;
-						set_mem_do_rinst = 1;
-					end
-				end else begin
-					latched_branch <= instr_jalr;
-					latched_store <= 1;
-					latched_stalu <= 1;
-					cpu_state <= cpu_state_fetch;
-				end
-			end
+			
+                reg_out <= reg_pc + decoded_imm;
+                if ((TWO_CYCLE_ALU || TWO_CYCLE_COMPARE) && (alu_wait || alu_wait_2)) begin
+                    mem_do_rinst <= mem_do_prefetch && !alu_wait_2;
+                    alu_wait <= alu_wait_2;
+                end else if (is_beq_bne_blt_bge_bltu_bgeu) begin
+                    latched_rd <= 0;
+                    latched_store <= TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0;
+                    latched_branch <= TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0;
+                    if (mem_done)
+                        cpu_state <= cpu_state_fetch;
+                    if (TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0) begin
+                        decoder_trigger <= 0;
+                        set_mem_do_rinst = 1;
+                    end
+                end else begin
+                    latched_branch <= instr_jalr;
+                    latched_store  <= 1;
+                    latched_stalu  <= 1;
+                    cpu_state      <= cpu_state_fetch;
+                end
+            end
 
 			cpu_state_shift: begin
+			
 				latched_store <= 1;
 				if (reg_sh == 0) begin
-					reg_out <= reg_op1;
+					reg_out      <= reg_op1;
 					mem_do_rinst <= mem_do_prefetch;
-					cpu_state <= cpu_state_fetch;
+					cpu_state    <= cpu_state_fetch;
 				end else if (TWO_STAGE_SHIFT && reg_sh >= 4) begin
 					(* parallel_case, full_case *)
 					case (1'b1)
@@ -1852,6 +2373,7 @@ module picorv32 #(
 			end
 
 			cpu_state_stmem: begin
+			
 				if (ENABLE_TRACE)
 					reg_out <= reg_op2;
 				if (!mem_do_prefetch || mem_done) begin
@@ -1878,6 +2400,7 @@ module picorv32 #(
 			end
 
 			cpu_state_ldmem: begin
+			
 				latched_store <= 1;
 				if (!mem_do_prefetch || mem_done) begin
 					if (!mem_do_rdata) begin
@@ -1885,7 +2408,7 @@ module picorv32 #(
 						case (1'b1)
 							instr_lb || instr_lbu: mem_wordsize <= 2;
 							instr_lh || instr_lhu: mem_wordsize <= 1;
-							instr_lw: mem_wordsize <= 0;
+							instr_lw:              mem_wordsize <= 0;
 						endcase
 						latched_is_lu <= is_lbu_lhu_lw;
 						latched_is_lh <= instr_lh;
@@ -2142,9 +2665,9 @@ module picorv32 #(
 	reg [3:0] last_mem_la_wstrb = 0;
 
 	always @(posedge clk) begin
-		last_mem_la_read <= mem_la_read;
+		last_mem_la_read  <= mem_la_read;
 		last_mem_la_write <= mem_la_write;
-		last_mem_la_addr <= mem_la_addr;
+		last_mem_la_addr  <= mem_la_addr;
 		last_mem_la_wdata <= mem_la_wdata;
 		last_mem_la_wstrb <= mem_la_wstrb;
 
@@ -2172,11 +2695,11 @@ endmodule
 // Note that your implementation must match the requirements of
 // the PicoRV32 configuration. (e.g. QREGS, etc)
 module picorv32_regs (
-	input clk, wen,
-	input [5:0] waddr,
-	input [5:0] raddr1,
-	input [5:0] raddr2,
-	input [31:0] wdata,
+	input         clk, wen,
+	input  [5:0]  waddr,
+	input  [5:0]  raddr1,
+	input  [5:0]  raddr2,
+	input  [31:0] wdata,
 	output [31:0] rdata1,
 	output [31:0] rdata2
 );
@@ -2209,9 +2732,9 @@ module picorv32_pcpi_mul #(
 	output reg        pcpi_wait,
 	output reg        pcpi_ready
 );
-	reg instr_mul, instr_mulh, instr_mulhsu, instr_mulhu;
-	wire instr_any_mul = |{instr_mul, instr_mulh, instr_mulhsu, instr_mulhu};
-	wire instr_any_mulh = |{instr_mulh, instr_mulhsu, instr_mulhu};
+	reg  instr_mul, instr_mulh, instr_mulhsu, instr_mulhu;
+	wire instr_any_mul    = |{instr_mul, instr_mulh, instr_mulhsu, instr_mulhu};
+	wire instr_any_mulh   = |{instr_mulh, instr_mulhsu, instr_mulhu};
 	wire instr_rs1_signed = |{instr_mulh, instr_mulhsu};
 	wire instr_rs2_signed = |{instr_mulh};
 
@@ -2219,35 +2742,35 @@ module picorv32_pcpi_mul #(
 	wire mul_start = pcpi_wait && !pcpi_wait_q;
 
 	always @(posedge clk) begin
-		instr_mul <= 0;
-		instr_mulh <= 0;
+		instr_mul    <= 0;
+		instr_mulh   <= 0;
 		instr_mulhsu <= 0;
-		instr_mulhu <= 0;
+		instr_mulhu  <= 0;
 
 		if (resetn && pcpi_valid && pcpi_insn[6:0] == 7'b0110011 && pcpi_insn[31:25] == 7'b0000001) begin
 			case (pcpi_insn[14:12])
-				3'b000: instr_mul <= 1;
-				3'b001: instr_mulh <= 1;
+				3'b000: instr_mul    <= 1;
+				3'b001: instr_mulh   <= 1;
 				3'b010: instr_mulhsu <= 1;
-				3'b011: instr_mulhu <= 1;
+				3'b011: instr_mulhu  <= 1;
 			endcase
 		end
 
-		pcpi_wait <= instr_any_mul;
+		pcpi_wait   <= instr_any_mul;
 		pcpi_wait_q <= pcpi_wait;
 	end
 
 	reg [63:0] rs1, rs2, rd, rdx;
 	reg [63:0] next_rs1, next_rs2, this_rs2;
 	reg [63:0] next_rd, next_rdx, next_rdt;
-	reg [6:0] mul_counter;
+	reg [6:0]  mul_counter;
 	reg mul_waiting;
 	reg mul_finish;
 	integer i, j;
 
 	// carry save accumulator
 	always @* begin
-		next_rd = rd;
+		next_rd  = rd;
 		next_rdx = rdx;
 		next_rs1 = rs1;
 		next_rs2 = rs2;
@@ -2436,21 +2959,23 @@ module picorv32_pcpi_div (
 	wire start = pcpi_wait && !pcpi_wait_q;
 
 	always @(posedge clk) begin
-		instr_div <= 0;
+		instr_div  <= 0;
 		instr_divu <= 0;
-		instr_rem <= 0;
+		instr_rem  <= 0;
 		instr_remu <= 0;
 
 		if (resetn && pcpi_valid && !pcpi_ready && pcpi_insn[6:0] == 7'b0110011 && pcpi_insn[31:25] == 7'b0000001) begin
 			case (pcpi_insn[14:12])
-				3'b100: instr_div <= 1;
+				3'b100: instr_div  <= 1;
 				3'b101: instr_divu <= 1;
-				3'b110: instr_rem <= 1;
+				3'b110: instr_rem  <= 1;
 				3'b111: instr_remu <= 1;
 			endcase
+		end else if (resetn && pcpi_valid && !pcpi_ready && pcpi_insn[6:0] == 7'b1010111 &&pcpi_insn[14:12] == 3'b111) begin
+		  instr_div  <= 1;
 		end
 
-		pcpi_wait <= instr_any_div_rem && resetn;
+		pcpi_wait   <= instr_any_div_rem && resetn;
 		pcpi_wait_q <= pcpi_wait && resetn;
 	end
 
@@ -2463,17 +2988,17 @@ module picorv32_pcpi_div (
 
 	always @(posedge clk) begin
 		pcpi_ready <= 0;
-		pcpi_wr <= 0;
-		pcpi_rd <= 'bx;
+		pcpi_wr    <= 0;
+		pcpi_rd    <= 'bx;
 
 		if (!resetn) begin
 			running <= 0;
 		end else
 		if (start) begin
-			running <= 1;
+			running  <= 1;
 			dividend <= (instr_div || instr_rem) && pcpi_rs1[31] ? -pcpi_rs1 : pcpi_rs1;
-			divisor <= ((instr_div || instr_rem) && pcpi_rs2[31] ? -pcpi_rs2 : pcpi_rs2) << 31;
-			outsign <= (instr_div && (pcpi_rs1[31] != pcpi_rs2[31]) && |pcpi_rs2) || (instr_rem && pcpi_rs1[31]);
+			divisor  <= ((instr_div || instr_rem) && pcpi_rs2[31] ? -pcpi_rs2 : pcpi_rs2) << 31;
+			outsign  <= (instr_div && (pcpi_rs1[31] != pcpi_rs2[31]) && |pcpi_rs2) || (instr_rem && pcpi_rs1[31]);
 			quotient <= 0;
 			quotient_msk <= 1 << 31;
 		end else
@@ -2509,6 +3034,239 @@ module picorv32_pcpi_div (
 	end
 endmodule
 
+
+
+/***************************************************************
+ * picorv32_pcpi_vec
+ ***************************************************************/
+
+module picorv32_pcpi_vec 
+import rv_vector_pkg::*;
+(
+    input clk, resetn,
+    
+    // Interfaz PCPI
+    input                 pcpi_valid,
+    input      [31:0]     pcpi_insn,
+    input      [VLEN-1:0] pcpi_vs1,
+    input      [VLEN-1:0] pcpi_vs2,
+    output reg            pcpi_wr,
+    output reg [VLEN-1:0] pcpi_vd,
+    output reg            pcpi_wait,
+    output reg            pcpi_ready
+);
+    // Decodificación de instrucciones vectoriales
+    reg instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv;
+    wire instr_any_vec = |{instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv};
+    
+    // Detección de transición en pcpi_wait para iniciar operación
+    reg pcpi_wait_q;
+    wire vec_start = pcpi_wait && !pcpi_wait_q;
+    
+    // Extracción de campos de instrucción
+    vfunct3_t vfunc3;
+    vfunct6_t vfunc6;
+    
+    // Conversión de datos a tipo vector_t
+    vector_t vs1_data, vs2_data, result_data;
+    
+    // Configuración vectorial 
+    sew_t vsew;
+    reg [31:0] vl;             // Vector length
+    
+    // Control de estado
+    reg [31:0] vec_counter;    // Elementos por procesar
+    reg vec_waiting;           // Estado de espera
+    reg vec_finish;            // Operación completada
+    reg proc_done;       // Indicador de finalización del procesamiento
+    
+    // Variables para cálculo y control
+    reg [31:0] batch_size;
+    integer i, idx;
+    
+    // Asignación de campos de instrucción
+    assign vfunc3 = vfunct3_t'(pcpi_insn[14:12]);
+    assign vfunc6 = vfunct6_t'(pcpi_insn[31:26]);
+    
+    // Conversión de operandos
+    assign vs1_data = vector_t'(pcpi_vs1);
+    assign vs2_data = vector_t'(pcpi_vs2);
+    
+    // Usando SEW=32 por defecto
+    assign vsew = sew_t'(3'b010);
+    
+    // Decodificación de instrucciones en cada ciclo
+    always @(posedge clk) begin
+        instr_vadd <= 0;
+        instr_vsub <= 0;
+        instr_vand <= 0;
+        instr_vor  <= 0;
+        instr_vxor <= 0;
+        instr_vmv  <= 0;
+        
+        if (resetn && pcpi_valid && pcpi_insn[6:0] == OP_V) begin
+            case (vfunc6)
+                VADD: instr_vadd <= 1;
+                VSUB: instr_vsub <= 1;
+                VAND: instr_vand <= 1;
+                VOR:  instr_vor  <= 1;
+                VXOR: instr_vxor <= 1;
+                VMV:  instr_vmv  <= 1;
+            endcase
+        end
+        
+        // Control principal de espera (como en pcpi_mul)
+        pcpi_wait   <= instr_any_vec && resetn;
+        pcpi_wait_q <= pcpi_wait && resetn;
+    end
+    
+    // Cálculo del vector length basado en SEW
+    always @* begin
+        case (vsew)
+            SEW8:  vl = VLEN/8;
+            SEW16: vl = VLEN/16;
+            SEW32: vl = VLEN/32;
+            default: vl = VLEN/32;
+        endcase
+        
+        // Cálculo del tamaño del lote
+        batch_size = (vec_counter >= 16) ? 16'd16 : vec_counter[15:0];
+    end
+    
+    // Bloque principal de procesamiento (similar a pcpi_mul)
+    always @(posedge clk) begin
+        vec_finish <= 0;
+        proc_done <= 0;
+        
+        if (!resetn) begin
+            vec_waiting <= 1;
+            vec_counter <= 0;
+            result_data <= 0;
+            pcpi_wr     <= 0;
+            pcpi_ready  <= 0;
+            pcpi_vd     <= 0;
+            proc_done   <= 0;
+        end else
+        if (vec_waiting) begin
+            // Inicialización al comenzar
+            if (vec_start) begin
+                vec_counter <= vl;
+                result_data <= 0;
+                
+                // VMV es caso especial de copia
+                if (instr_vmv) begin
+                    result_data <= vs1_data;
+                    vec_counter <= 0;
+                    proc_done <= 1;
+                end else
+                    vec_waiting <= 0;
+            end
+        end else begin
+            // Procesamiento por lotes (16 elementos por ciclo)
+            if (vec_counter > 0) begin
+                case (1'b1)
+                    instr_vadd: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx]  + vs2_data.i8[idx];
+                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx] + vs2_data.i16[idx];
+                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx] + vs2_data.i32[idx];
+                                    default: result_data.i32[idx] <= vs1_data.i32[idx] + vs2_data.i32[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
+                    instr_vsub: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]  <= vs2_data.i8[idx]  - vs1_data.i8[idx];
+                                    SEW16: result_data.i16[idx] <= vs2_data.i16[idx] - vs1_data.i16[idx];
+                                    SEW32: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx];
+                                    default: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
+                    instr_vand: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx]  & vs2_data.i8[idx];
+                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx] & vs2_data.i16[idx];
+                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx] & vs2_data.i32[idx];
+                                    default: result_data.i32[idx] <= vs1_data.i32[idx] & vs2_data.i32[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
+                    instr_vor: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx]  | vs2_data.i8[idx];
+                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx] | vs2_data.i16[idx];
+                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx] | vs2_data.i32[idx];
+                                    default: result_data.i32[idx] <= vs1_data.i32[idx] | vs2_data.i32[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
+                    instr_vxor: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx]  ^ vs2_data.i8[idx];
+                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx] ^ vs2_data.i16[idx];
+                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx] ^ vs2_data.i32[idx];
+                                    default: result_data.i32[idx] <= vs1_data.i32[idx] ^ vs2_data.i32[idx];
+                                endcase
+                            end
+                        end
+                    end
+                endcase
+                
+                // Actualizar contador
+                if (vec_counter <= batch_size) begin
+                    vec_counter <= 0;
+                    proc_done   <= 1;
+                end else begin
+                    vec_counter <= vec_counter - batch_size;
+                end
+            end
+        end
+        
+        // Manejo de finalización
+        if (proc_done) begin
+            vec_finish  <= 1;
+            vec_waiting <= 1;
+            proc_done   <= 0;
+        end
+    end
+    
+    // Bloque de control de señales de salida (como en pcpi_mul)
+    always @(posedge clk) begin
+        pcpi_wr <= 0;
+        pcpi_ready <= 0;
+        
+        if (vec_finish && resetn) begin
+            pcpi_wr <= 1;
+            pcpi_ready <= 1;
+            pcpi_vd <= result_data.ifull;
+        end
+    end
+    
+endmodule
 
 /***************************************************************
  * picorv32_axi
