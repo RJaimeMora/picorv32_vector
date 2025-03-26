@@ -296,6 +296,7 @@ module picorv32
         wire [31:0] vcsr_vlenb = VLEN/8; // Vector register length in bytes (128/8)
         reg [31:0]  vcsr_vtype = {26'b0, 3'b010, 3'b000};  // Vector data type configuration
         reg [31:0]  vcsr_vl    = VLEN/32;  // 16 elementos por defecto
+        reg [31:0]  new_vl;
         
         // Vector configuration fields
         sew_t       vsew  = sew_t'(vcsr_vtype[5:3]);  // SEW encoding (element width)
@@ -2036,11 +2037,32 @@ module picorv32
 								dbg_rs2val       <= cpuregs_rs2;
 								dbg_rs2val_valid <= 1;
 								if (pcpi_int_ready) begin
-									mem_do_rinst  <= 1;
-									pcpi_valid    <= 0;
-									reg_out       <= pcpi_int_rd;
-									latched_store <= pcpi_int_wr;
-			                        cpu_state     <= cpu_state_fetch;
+								
+								`ifdef VECTOR_ENABLE
+								    if (vfunc3 == OPCFG && vector_opcode == OP_V) begin
+								        if (decoded_rs1 != 0) begin
+								            if (pcpi_int_rd > cpuregs_rs1) begin
+								                reg_out <= 11;
+								                vcsr_vl <= 0;
+								            end else begin
+								                reg_out <= 12;
+								                vcsr_vl <= 0;
+								             end
+								        end else if (decoded_rs1 == 0 && decoded_rd != 0) begin
+								            reg_out <= 13;
+								            vcsr_vl <= pcpi_int_rd;
+								        end else begin
+								            reg_out <= 14;
+								        end
+								    end else 
+								`endif
+								    begin 
+                                        reg_out       <= 15;
+                                    end
+                                    mem_do_rinst  <= 1;
+                                    pcpi_valid    <= 0;
+                                    latched_store <= pcpi_int_wr;
+                                    cpu_state     <= cpu_state_fetch;
 								end else
 								if (CATCH_ILLINSN && (pcpi_timeout || instr_ecall_ebreak)) begin
 									pcpi_valid <= 0;
@@ -2104,10 +2126,10 @@ module picorv32
                                     pcpi_valid <= 1;
                                     vsew       <= sew_t'(vtype[5:3]);
                                     vcsr_vtype <= {24'b0,1'b0,1'b0,vtype[5:3],3'b000};
-                                    vcsr_vl    <= VLEN / (4*(2 << vtype[5:3]));
+                                    //vcsr_vl    <= VLEN / (4*(2 << vtype[5:3]));
                                     SEW        <= 8 << vtype[5:3];
-                                    reg_op1    <= VLEN;  // Valor vl solicitado (rs1)
-                                    reg_op2    <= 8 << vtype[5:3];
+                                    reg_op1    <= VLEN;  // Valor vl para calcular VLMAX
+                                    reg_op2    <= 8 << vtype[5:3]; // Valor de SEW para calcular VLMAX
                                     
                                     // Avanzar al estado exec para realizar la configuración
                                     if (pcpi_int_ready) begin
@@ -3735,42 +3757,7 @@ module picorv32_wb #(
 		.rvfi_pc_wdata (rvfi_pc_wdata ),
 		.rvfi_mem_addr (rvfi_mem_addr ),
 		.rvfi_mem_rmask(rvfi_mem_rmask),
-		.rvfi_mem_wmask(rvfi_mem_wmask),// Instrucciones tipo I
-    000000000101_00000_000_01011_0010011  // li x11, 5                  00500593
-    000000000011_00000_000_01100_0010011  // li x12, 3                  00300613
-    000000001010_00000_000_01101_0010011  // li x13, 10                 00A00693
-    000000001111_00000_000_01110_0010011  // li x14, 15                 00F00713
-    000000000001_00000_000_01111_0010011  // li x15, 1                  00100793
-    000000001000_00000_000_10000_0010011  // li x16, 8                  00100813
-
-// Operaciones escalares 
-
-    0000001_01011_01101_100_10101_0110011  // div x21, x13, x11         02b6cab3
-    0000001_01101_01011_000_10100_0110011  // mul x20, x11, x13         02d58a33
-
-// Instrucciones vectoriales
-
-    0_000_0_0_000_000_00000_111_11110_1010111    // vsetvli e8 lmul1    00007F57
-    
-    010111_1_00000_01011_100_00001_1010111  // vmv.v.x v1, x11          5E05C0D7
-    010111_1_00000_01100_100_00010_1010111  // vmv.v.x v2, x12          5E064157
-    
-    0_000_0_0_001_000_00000_111_11110_1010111    // vsetvli e16 lmul1   00807F57
-    
-    010111_1_00000_01101_100_00011_1010111  // vmv.v.x v3, x13          5E06C1D7
-    010111_1_00000_01110_100_00100_1010111  // vmv.v.x v4, x14          5E074257
-    
-    0_000_0_0_010_000_00000_111_11110_1010111    // vsetvli e32 lmul1   01007F57
-    
-    010111_1_00000_01111_100_00101_1010111  // vmv.v.x v5, x15          5E07C2D7
-    010111_1_00000_10000_100_00110_1010111  // vmv.v.x v6, x16          5E084357
-    
-    
-    000000_1_00010_00001_000_00111_1010111  // vadd.vv v7, v1, v2       02208357
-    000010_1_00001_00011_000_01000_1010111  // vsub.vv v8, v1, v3       0A3083D7
-    
-    000000000000_00000_000_00000_1110011    // ecall                    00000073
-
+		.rvfi_mem_wmask(rvfi_mem_wmask),
 		.rvfi_mem_rdata(rvfi_mem_rdata),
 		.rvfi_mem_wdata(rvfi_mem_wdata),
 `endif
