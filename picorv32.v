@@ -474,6 +474,8 @@ module picorv32
             .clk       (clk),
             .resetn    (resetn),
             .pcpi_valid(pcpi_vec_valid),
+            .pcpi_vl   (vcsr_vl       ),
+            .pcpi_vsew (vsew          ),
             .pcpi_insn (pcpi_vec_insn ),
             .pcpi_vs1  (pcpi_vec_vs1  ),
             .pcpi_vs2  (pcpi_vec_vs2  ),
@@ -1006,7 +1008,7 @@ module picorv32
 		if (instr_timer)    new_ascii_instr = "timer";
 		
 		`ifdef VECTOR_ENABLE
-        // Vector Arithmetic Instructions
+        // Vector Aritvector_opchmetic Instructions
         if (instr_vadd) new_ascii_instr = "vadd";
         if (instr_vsub) new_ascii_instr = "vsub";
         if (instr_vadc) new_ascii_instr = "vadc";
@@ -2051,9 +2053,7 @@ module picorv32
 								        end else if (decoded_rs1 == 0 && decoded_rd != 0) begin
 								            reg_out <= 13;
 								            vcsr_vl <= pcpi_int_rd;
-								        end else begin
-								            reg_out <= 14;
-								        end
+								        end else reg_out <= 14;
 								    end else 
 								`endif
 								    begin 
@@ -2133,9 +2133,23 @@ module picorv32
                                     
                                     // Avanzar al estado exec para realizar la configuración
                                     if (pcpi_int_ready) begin
+                                        if (decoded_rs1 != 0) begin
+								            if (pcpi_int_rd > cpuregs_rs1) begin
+								                reg_out <= cpuregs_rs1;
+								                vcsr_vl <= cpuregs_rs1;
+								            end else begin
+								                reg_out <= pcpi_int_rd;
+								                vcsr_vl <= pcpi_int_rd;
+								             end
+								        end else if (decoded_rs1 == 0 && decoded_rd != 0) begin
+								            reg_out <= pcpi_int_rd;
+								            vcsr_vl <= pcpi_int_rd;
+								        end else begin
+								            reg_out <= vcsr_vl;
+								        end
                                         mem_do_rinst  <= 1;
                                         pcpi_valid    <= 0;
-                                        reg_out       <= pcpi_int_rd;
+                                        //reg_out       <= 10;
                                         latched_store <= pcpi_int_wr;
                                         cpu_state     <= cpu_state_fetch;
                                     end
@@ -3070,6 +3084,8 @@ import rv_vector_pkg::*;
     // Interfaz PCPI
     input                 pcpi_valid,
     input      [31:0]     pcpi_insn,
+    input      [31:0]     pcpi_vl,
+    input      [2:0]      pcpi_vsew,
     input      [VLEN-1:0] pcpi_vs1,
     input      [VLEN-1:0] pcpi_vs2,
     output reg            pcpi_wr,
@@ -3115,7 +3131,8 @@ import rv_vector_pkg::*;
     assign vs2_data = vector_t'(pcpi_vs2);
     
     // Usando SEW=32 por defecto
-    assign vsew = sew_t'(3'b010);
+    assign vsew = sew_t'(pcpi_vsew);
+    assign vl   = pcpi_vl;
     
     // Decodificación de instrucciones en cada ciclo
     always @(posedge clk) begin
@@ -3144,12 +3161,12 @@ import rv_vector_pkg::*;
     
     // Cálculo del vector length basado en SEW
     always @* begin
-        case (vsew)
+        /*case (vsew)
             SEW8:  vl = VLEN/8;
             SEW16: vl = VLEN/16;
             SEW32: vl = VLEN/32;
             default: vl = VLEN/32;
-        endcase
+        endcase*/
         
         // Cálculo del tamaño del lote
         batch_size = (vec_counter >= 16) ? 16'd16 : vec_counter[15:0];
@@ -3174,14 +3191,7 @@ import rv_vector_pkg::*;
             if (vec_start) begin
                 vec_counter <= vl;
                 result_data <= 0;
-                
-                // VMV es caso especial de copia
-                if (instr_vmv) begin
-                    result_data <= vs1_data;
-                    vec_counter <= 0;
-                    proc_done <= 1;
-                end else
-                    vec_waiting <= 0;
+                vec_waiting <= 0;
             end
         end else begin
             // Procesamiento por lotes (16 elementos por ciclo)
@@ -3252,6 +3262,20 @@ import rv_vector_pkg::*;
                                     SEW16: result_data.i16[idx] <= vs1_data.i16[idx] ^ vs2_data.i16[idx];
                                     SEW32: result_data.i32[idx] <= vs1_data.i32[idx] ^ vs2_data.i32[idx];
                                     default: result_data.i32[idx] <= vs1_data.i32[idx] ^ vs2_data.i32[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
+                    instr_vmv: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx];
+                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx];
+                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx];
+                                    default: result_data.i32[idx] <= vs1_data.i32[idx];
                                 endcase
                             end
                         end
