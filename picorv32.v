@@ -1718,7 +1718,7 @@ module picorv32
                                 vregs[latched_rd][i*16 +: 16] <= vregs_wdata[i*16 +: 16];
                         end
                     end
-                    SEW32: begin // SEW = 32 bits
+                    SEW32: begin // SEW = 32 bit00000s
                         for (int i = 0; i < VLEN/32; i = i + 1) begin
                             // Usar el bit i-ésimo de vregs[0] como máscara
                             if (vregs[0][i])
@@ -1741,8 +1741,8 @@ module picorv32
         //vpuregs_vs2 = 'bx;
 
         // Leer operandos vectoriales 
-        vpuregs_vs1 = decoded_rs1 ? vregs[decoded_rs1] : 0;
-        vpuregs_vs2 = decoded_rs2 ? vregs[decoded_rs2] : 0;
+        vpuregs_vs1 = vregs[decoded_rs1];
+        vpuregs_vs2 = vregs[decoded_rs2];
 
     end
 `endif
@@ -3161,12 +3161,6 @@ import rv_vector_pkg::*;
     
     // Cálculo del vector length basado en SEW
     always @* begin
-        /*case (vsew)
-            SEW8:  vl = VLEN/8;
-            SEW16: vl = VLEN/16;
-            SEW32: vl = VLEN/32;
-            default: vl = VLEN/32;
-        endcase*/
         
         // Cálculo del tamaño del lote
         batch_size = (vec_counter >= 16) ? 16'd16 : vec_counter[15:0];
