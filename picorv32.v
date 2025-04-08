@@ -1698,7 +1698,7 @@ module picorv32
     
     // Bloque de escritura de registros vectoriales
     always @(posedge clk) begin
-        if (resetn && vregs_write && latched_rd) begin
+        if (resetn && vregs_write) begin
             if (vm) begin // Sin enmascaramiento (vm=1)
                 vregs[latched_rd] <= vregs_wdata;
             end else begin
