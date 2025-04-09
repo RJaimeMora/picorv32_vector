@@ -3098,8 +3098,8 @@ import rv_vector_pkg::*;
     output reg            pcpi_ready
 );
     // Decodificación de instrucciones vectoriales
-    reg instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv, instr_vsbc, instr_vminu;
-    wire instr_any_vec = |{instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv, instr_vsbc, instr_vminu};
+    reg instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv, instr_vsbc, instr_vminu, instr_vmaxu;
+    wire instr_any_vec = |{instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv, instr_vsbc, instr_vminu, instr_vmaxu};
     
     // Detección de transición en pcpi_wait para iniciar operación
     reg pcpi_wait_q;
@@ -3108,6 +3108,7 @@ import rv_vector_pkg::*;
     // Extracción de campos de instrucción
     vfunct3_t vfunc3;
     vfunct6_t vfunc6;
+    wire vm = pcpi_insn[25];
     
     // Conversión de datos a tipo vector_t
     vector_t vs1_data, vs2_data, result_data;
@@ -3150,17 +3151,19 @@ import rv_vector_pkg::*;
         instr_vmv   <= 0;
         instr_vsbc  <= 0;
         instr_vminu <= 0;
+        instr_vmaxu <= 0;
         
         if (resetn && pcpi_valid && pcpi_insn[6:0] == OP_V) begin
             case (vfunc6)
-                VADD : instr_vadd  <= 1;
-                VSUB : instr_vsub  <= 1;
-                VAND : instr_vand  <= 1;
-                VOR  : instr_vor   <= 1;
-                VXOR : instr_vxor  <= 1;
-                VMV  : instr_vmv   <= 1;
-                VSBC : instr_vsbc  <= 1;
-                VMINU: instr_vminu <= 1;
+                VADD  : instr_vadd  <= 1;
+                VSUB  : instr_vsub  <= 1;
+                VAND  : instr_vand  <= 1;
+                VOR   : instr_vor   <= 1;
+                VXOR  : instr_vxor  <= 1;
+                VMV   : instr_vmv   <= 1;
+                VSBC  : instr_vsbc  <= !vm;
+                VMINU : instr_vminu <= 1;
+                VMAXU : instr_vmaxu <= 1;
             endcase
         end
         
@@ -3312,6 +3315,20 @@ import rv_vector_pkg::*;
                             end
                         end
                     end
+                    
+                    instr_vmaxu: begin
+						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+							idx = vl - vec_counter + i;
+							if (idx >= 0 && idx < vl) begin
+								case (vsew)
+									SEW8:  result_data.i8[idx]    <= (vs2_data.i8[idx]  > vs1_data.i8[idx])  ? vs2_data.i8[idx]  : vs1_data.i8[idx];
+									SEW16: result_data.i16[idx]   <= (vs2_data.i16[idx] > vs1_data.i16[idx]) ? vs2_data.i16[idx] : vs1_data.i16[idx];
+									SEW32: result_data.i32[idx]   <= (vs2_data.i32[idx] > vs1_data.i32[idx]) ? vs2_data.i32[idx] : vs1_data.i32[idx];
+									default: result_data.i32[idx] <= (vs2_data.i32[idx] > vs1_data.i32[idx]) ? vs2_data.i32[idx] : vs1_data.i32[idx];
+								endcase
+							end
+						end
+					end
                     
                 endcase
                 
