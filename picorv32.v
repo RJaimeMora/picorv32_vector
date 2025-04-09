@@ -214,6 +214,7 @@ module picorv32
       output reg [31:0]     pcpi_vec_insn,
       output     [VLEN-1:0] pcpi_vec_vs1,
       output     [VLEN-1:0] pcpi_vec_vs2,
+      output     [VLEN-1:0] pcpi_vec_v0,
       input      [VLEN-1:0] pcpi_vec_vd,
       input                 pcpi_vec_wait,
       input                 pcpi_vec_ready,
@@ -289,7 +290,7 @@ module picorv32
             if (REGS_INIT_ZERO) begin
                 for (j = 0; j < 32; j = j+1)
                     vregs[j] = '0;
-            end
+            end else vregs[0] = '0;
         end
         
         // Registros y señales para manejo vectorial
@@ -314,6 +315,7 @@ module picorv32
 	    
 	    assign pcpi_vec_vs1 = vreg_pcpi_op1;
         assign pcpi_vec_vs2 = vreg_pcpi_op2;
+        assign pcpi_vec_v0  = vregs[0];
         
     `endif // VECTOR_ENABLE
 
@@ -479,6 +481,7 @@ module picorv32
             .pcpi_insn (pcpi_vec_insn ),
             .pcpi_vs1  (pcpi_vec_vs1  ),
             .pcpi_vs2  (pcpi_vec_vs2  ),
+            .pcpi_v0   (pcpi_vec_v0   ),
             .pcpi_wr   (pcpi_vec_wr   ),
             .pcpi_vd   (pcpi_vec_vd   ),
             .pcpi_wait (pcpi_vec_wait ),
@@ -3088,14 +3091,15 @@ import rv_vector_pkg::*;
     input      [2:0]      pcpi_vsew,
     input      [VLEN-1:0] pcpi_vs1,
     input      [VLEN-1:0] pcpi_vs2,
+    input      [VLEN-1:0] pcpi_v0,
     output reg            pcpi_wr,
     output reg [VLEN-1:0] pcpi_vd,
     output reg            pcpi_wait,
     output reg            pcpi_ready
 );
     // Decodificación de instrucciones vectoriales
-    reg instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv;
-    wire instr_any_vec = |{instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv};
+    reg instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv, instr_vsbc, instr_vminu;
+    wire instr_any_vec = |{instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv, instr_vsbc, instr_vminu};
     
     // Detección de transición en pcpi_wait para iniciar operación
     reg pcpi_wait_q;
@@ -3107,6 +3111,7 @@ import rv_vector_pkg::*;
     
     // Conversión de datos a tipo vector_t
     vector_t vs1_data, vs2_data, result_data;
+    reg [VLEN-1:0] v0_data;
     
     // Configuración vectorial 
     sew_t vsew;
@@ -3129,6 +3134,7 @@ import rv_vector_pkg::*;
     // Conversión de operandos
     assign vs1_data = vector_t'(pcpi_vs1);
     assign vs2_data = vector_t'(pcpi_vs2);
+    assign v0_data  = pcpi_v0;
     
     // Usando SEW=32 por defecto
     assign vsew = sew_t'(pcpi_vsew);
@@ -3136,21 +3142,25 @@ import rv_vector_pkg::*;
     
     // Decodificación de instrucciones en cada ciclo
     always @(posedge clk) begin
-        instr_vadd <= 0;
-        instr_vsub <= 0;
-        instr_vand <= 0;
-        instr_vor  <= 0;
-        instr_vxor <= 0;
-        instr_vmv  <= 0;
+        instr_vadd  <= 0;
+        instr_vsub  <= 0;
+        instr_vand  <= 0;
+        instr_vor   <= 0;
+        instr_vxor  <= 0;
+        instr_vmv   <= 0;
+        instr_vsbc  <= 0;
+        instr_vminu <= 0;
         
         if (resetn && pcpi_valid && pcpi_insn[6:0] == OP_V) begin
             case (vfunc6)
-                VADD: instr_vadd <= 1;
-                VSUB: instr_vsub <= 1;
-                VAND: instr_vand <= 1;
-                VOR:  instr_vor  <= 1;
-                VXOR: instr_vxor <= 1;
-                VMV:  instr_vmv  <= 1;
+                VADD : instr_vadd  <= 1;
+                VSUB : instr_vsub  <= 1;
+                VAND : instr_vand  <= 1;
+                VOR  : instr_vor   <= 1;
+                VXOR : instr_vxor  <= 1;
+                VMV  : instr_vmv   <= 1;
+                VSBC : instr_vsbc  <= 1;
+                VMINU: instr_vminu <= 1;
             endcase
         end
         
@@ -3274,6 +3284,35 @@ import rv_vector_pkg::*;
                             end
                         end
                     end
+                    
+                    instr_vsbc: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]  <= vs2_data.i8[idx]  - vs1_data.i8[idx] - v0_data[idx];
+                                    SEW16: result_data.i16[idx] <= vs2_data.i16[idx] - vs1_data.i16[idx] - v0_data[idx];
+                                    SEW32: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx] - v0_data[idx];
+                                    default: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx] - v0_data[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
+                    instr_vminu: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]    <= (vs1_data.i8[idx]  < vs2_data.i8[idx])  ? vs1_data.i8[idx]  : vs2_data.i8[idx];
+								    SEW16: result_data.i16[idx]   <= (vs1_data.i16[idx] < vs2_data.i16[idx]) ? vs1_data.i16[idx] : vs2_data.i16[idx];
+								    SEW32: result_data.i32[idx]   <= (vs1_data.i32[idx] < vs2_data.i32[idx]) ? vs1_data.i32[idx] : vs2_data.i32[idx];
+								    default: result_data.i32[idx] <= (vs1_data.i32[idx] < vs2_data.i32[idx]) ? vs1_data.i32[idx] : vs2_data.i32[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
                 endcase
                 
                 // Actualizar contador
