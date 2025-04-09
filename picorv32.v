@@ -94,7 +94,7 @@ package rv_vector_pkg;
     VADC    = 6'b010000, // vadc    vd[i] = vs2[i] + vs1[i] + v0.mask[i]
     VSBC    = 6'b010010, // vsbc    vd[i] = vs2[i] - vs1[i] - v0.mask[i]
   // Min / max
-    VMINU   = 6'b000101, // vminu   unsigned
+    VMINU   = 6'b000100, // vminu   unsigned
     VMAXU   = 6'b000110, // vmaxu   unisgned
   // Logic Ops
     VAND    = 6'b001001, // vand    
@@ -3206,9 +3206,9 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx]  + vs2_data.i8[idx];
-                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx] + vs2_data.i16[idx];
-                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx] + vs2_data.i32[idx];
+                                    SEW8:  result_data.i8[idx]    <= vs1_data.i8[idx]  + vs2_data.i8[idx];
+                                    SEW16: result_data.i16[idx]   <= vs1_data.i16[idx] + vs2_data.i16[idx];
+                                    SEW32: result_data.i32[idx]   <= vs1_data.i32[idx] + vs2_data.i32[idx];
                                     default: result_data.i32[idx] <= vs1_data.i32[idx] + vs2_data.i32[idx];
                                 endcase
                             end
@@ -3220,9 +3220,9 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]  <= vs2_data.i8[idx]  - vs1_data.i8[idx];
-                                    SEW16: result_data.i16[idx] <= vs2_data.i16[idx] - vs1_data.i16[idx];
-                                    SEW32: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx];
+                                    SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  - vs1_data.i8[idx];
+                                    SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] - vs1_data.i16[idx];
+                                    SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] - vs1_data.i32[idx];
                                     default: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx];
                                 endcase
                             end
@@ -3234,9 +3234,9 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx]  & vs2_data.i8[idx];
-                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx] & vs2_data.i16[idx];
-                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx] & vs2_data.i32[idx];
+                                    SEW8:  result_data.i8[idx]    <= vs1_data.i8[idx]  & vs2_data.i8[idx];
+                                    SEW16: result_data.i16[idx]   <= vs1_data.i16[idx] & vs2_data.i16[idx];
+                                    SEW32: result_data.i32[idx]   <= vs1_data.i32[idx] & vs2_data.i32[idx];
                                     default: result_data.i32[idx] <= vs1_data.i32[idx] & vs2_data.i32[idx];
                                 endcase
                             end
@@ -3248,9 +3248,9 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx]  | vs2_data.i8[idx];
-                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx] | vs2_data.i16[idx];
-                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx] | vs2_data.i32[idx];
+                                    SEW8:  result_data.i8[idx]    <= vs1_data.i8[idx]  | vs2_data.i8[idx];
+                                    SEW16: result_data.i16[idx]   <= vs1_data.i16[idx] | vs2_data.i16[idx];
+                                    SEW32: result_data.i32[idx]   <= vs1_data.i32[idx] | vs2_data.i32[idx];
                                     default: result_data.i32[idx] <= vs1_data.i32[idx] | vs2_data.i32[idx];
                                 endcase
                             end
@@ -3262,9 +3262,9 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx]  ^ vs2_data.i8[idx];
-                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx] ^ vs2_data.i16[idx];
-                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx] ^ vs2_data.i32[idx];
+                                    SEW8:  result_data.i8[idx]    <= vs1_data.i8[idx]  ^ vs2_data.i8[idx];
+                                    SEW16: result_data.i16[idx]   <= vs1_data.i16[idx] ^ vs2_data.i16[idx];
+                                    SEW32: result_data.i32[idx]   <= vs1_data.i32[idx] ^ vs2_data.i32[idx];
                                     default: result_data.i32[idx] <= vs1_data.i32[idx] ^ vs2_data.i32[idx];
                                 endcase
                             end
@@ -3276,9 +3276,9 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]  <= vs1_data.i8[idx];
-                                    SEW16: result_data.i16[idx] <= vs1_data.i16[idx];
-                                    SEW32: result_data.i32[idx] <= vs1_data.i32[idx];
+                                    SEW8:  result_data.i8[idx]    <= vs1_data.i8[idx];
+                                    SEW16: result_data.i16[idx]   <= vs1_data.i16[idx];
+                                    SEW32: result_data.i32[idx]   <= vs1_data.i32[idx];
                                     default: result_data.i32[idx] <= vs1_data.i32[idx];
                                 endcase
                             end
@@ -3290,9 +3290,9 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]  <= vs2_data.i8[idx]  - vs1_data.i8[idx] - v0_data[idx];
-                                    SEW16: result_data.i16[idx] <= vs2_data.i16[idx] - vs1_data.i16[idx] - v0_data[idx];
-                                    SEW32: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx] - v0_data[idx];
+                                    SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  - vs1_data.i8[idx] - v0_data[idx];
+                                    SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] - vs1_data.i16[idx] - v0_data[idx];
+                                    SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] - vs1_data.i32[idx] - v0_data[idx];
                                     default: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx] - v0_data[idx];
                                 endcase
                             end
@@ -3304,10 +3304,10 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]    <= (vs1_data.i8[idx]  < vs2_data.i8[idx])  ? vs1_data.i8[idx]  : vs2_data.i8[idx];
-								    SEW16: result_data.i16[idx]   <= (vs1_data.i16[idx] < vs2_data.i16[idx]) ? vs1_data.i16[idx] : vs2_data.i16[idx];
-								    SEW32: result_data.i32[idx]   <= (vs1_data.i32[idx] < vs2_data.i32[idx]) ? vs1_data.i32[idx] : vs2_data.i32[idx];
-								    default: result_data.i32[idx] <= (vs1_data.i32[idx] < vs2_data.i32[idx]) ? vs1_data.i32[idx] : vs2_data.i32[idx];
+                                    SEW8:  result_data.i8[idx]      <= (vs2_data.i8[idx]  < vs1_data.i8[idx])  ?  vs2_data.i8[idx] : vs1_data.i8[idx];
+                                    SEW16: result_data.i16[idx]     <= (vs2_data.i16[idx] < vs1_data.i16[idx]) ?  vs2_data.i16[idx]: vs1_data.i16[idx];
+                                    SEW32: result_data.i32[idx]     <= (vs2_data.i32[idx] < vs1_data.i32[idx]) ?  vs2_data.i32[idx]: vs1_data.i32[idx];
+                                    default: result_data.i32[idx]   <= (vs2_data.i32[idx] < vs1_data.i32[idx]) ?  vs2_data.i32[idx]: vs1_data.i32[idx];
                                 endcase
                             end
                         end
