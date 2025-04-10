@@ -126,7 +126,7 @@ package rv_vector_pkg;
   typedef enum logic [6:0] {
     LOAD_FP  = 7'b0000111, // Floating point load
     STORE_FP = 7'b0100111, // Floating point store
-    OP_V   = 7'b1010111  // Vector configuration or arithmetic op
+    OP_V     = 7'b1010111  // Vector configuration or arithmetic op
   } major_opcodes_t;
   
   typedef enum logic[2:0] {
@@ -3209,28 +3209,29 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]    <= vs1_data.i8[idx]  + vs2_data.i8[idx];
-                                    SEW16: result_data.i16[idx]   <= vs1_data.i16[idx] + vs2_data.i16[idx];
-                                    SEW32: result_data.i32[idx]   <= vs1_data.i32[idx] + vs2_data.i32[idx];
-                                    default: result_data.i32[idx] <= vs1_data.i32[idx] + vs2_data.i32[idx];
+                                    SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  + (vm ? vs1_data.i8[idx]  : (v0_data[idx] ? vs1_data.i8[idx]  : 0));
+                                    SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] + (vm ? vs1_data.i16[idx] : (v0_data[idx] ? vs1_data.i16[idx] : 0));
+                                    SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] + (vm ? vs1_data.i32[idx] : (v0_data[idx] ? vs1_data.i32[idx] : 0));
+                                    default: result_data.i32[idx] <= vs2_data.i32[idx] + (vm ? vs1_data.i32[idx] : (v0_data[idx] ? vs1_data.i32[idx] : 0));
                                 endcase
                             end
                         end
                     end
                     
                     instr_vsub: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
-                            idx = vl - vec_counter + i;
-                            if (idx >= 0 && idx < vl) begin
-                                case (vsew)
-                                    SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  - vs1_data.i8[idx];
-                                    SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] - vs1_data.i16[idx];
-                                    SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] - vs1_data.i32[idx];
-                                    default: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx];
-                                endcase
-                            end
-                        end
-                    end
+						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+							idx = vl - vec_counter + i;
+							if (idx >= 0 && idx < vl) begin
+								case (vsew)
+									SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  - (vm ? vs1_data.i8[idx]  : (v0_data[idx] ? vs1_data.i8[idx]  : 0));
+									SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] - (vm ? vs1_data.i16[idx] : (v0_data[idx] ? vs1_data.i16[idx] : 0));
+									SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] - (vm ? vs1_data.i32[idx] : (v0_data[idx] ? vs1_data.i32[idx] : 0));
+									default: result_data.i32[idx] <= vs2_data.i32[idx] - (vm ? vs1_data.i32[idx] : (v0_data[idx] ? vs1_data.i32[idx] : 0));
+								endcase
+							end
+						end
+					end
+
                     
                     instr_vand: begin
                         for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
