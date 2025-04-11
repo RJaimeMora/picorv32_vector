@@ -1709,27 +1709,27 @@ module picorv32
                 case (vsew)
                     SEW8: begin // SEW = 8 bits
                         for (int i = 0; i < VLEN/8; i = i + 1) begin
-                            // Usar el bit i-ésimo de vregs[0] como máscara
                             if (vregs[0][i])
                                 vregs[latched_rd][i*8 +: 8] <= vregs_wdata[i*8 +: 8];
                         end
                     end
                     SEW16: begin // SEW = 16 bits
                         for (int i = 0; i < VLEN/16; i = i + 1) begin
-                            // Usar el bit i-ésimo de vregs[0] como máscara
                             if (vregs[0][i])
                                 vregs[latched_rd][i*16 +: 16] <= vregs_wdata[i*16 +: 16];
                         end
                     end
-                    SEW32: begin // SEW = 32 bit00000s
+                    SEW32: begin // SEW = 32 bit0s
                         for (int i = 0; i < VLEN/32; i = i + 1) begin
-                            // Usar el bit i-ésimo de vregs[0] como máscara
                             if (vregs[0][i])
                                 vregs[latched_rd][i*32 +: 32] <= vregs_wdata[i*32 +: 32];
                         end
                     end
                     default: begin
-                        // Caso por defecto (podría ser SEW64 si se agrega soporte)
+                        for (int i = 0; i < VLEN/32; i = i + 1) begin
+                            if (vregs[0][i])
+                                vregs[latched_rd][i*32 +: 32] <= vregs_wdata[i*32 +: 32];
+                        end
                     end
                 endcase
             end
@@ -3209,10 +3209,10 @@ import rv_vector_pkg::*;
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
-                                    SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  + (vm ? vs1_data.i8[idx]  : (v0_data[idx] ? vs1_data.i8[idx]  : 0));
-                                    SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] + (vm ? vs1_data.i16[idx] : (v0_data[idx] ? vs1_data.i16[idx] : 0));
-                                    SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] + (vm ? vs1_data.i32[idx] : (v0_data[idx] ? vs1_data.i32[idx] : 0));
-                                    default: result_data.i32[idx] <= vs2_data.i32[idx] + (vm ? vs1_data.i32[idx] : (v0_data[idx] ? vs1_data.i32[idx] : 0));
+                                    SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  + vs1_data.i8[idx];
+                                    SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] + vs1_data.i16[idx];
+                                    SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] + vs1_data.i32[idx];
+                                    default: result_data.i32[idx] <= vs2_data.i32[idx] + vs1_data.i32[idx];
                                 endcase
                             end
                         end
@@ -3223,10 +3223,10 @@ import rv_vector_pkg::*;
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
-									SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  - (vm ? vs1_data.i8[idx]  : (v0_data[idx] ? vs1_data.i8[idx]  : 0));
-									SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] - (vm ? vs1_data.i16[idx] : (v0_data[idx] ? vs1_data.i16[idx] : 0));
-									SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] - (vm ? vs1_data.i32[idx] : (v0_data[idx] ? vs1_data.i32[idx] : 0));
-									default: result_data.i32[idx] <= vs2_data.i32[idx] - (vm ? vs1_data.i32[idx] : (v0_data[idx] ? vs1_data.i32[idx] : 0));
+									SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  - vs1_data.i8[idx];
+									SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] - vs1_data.i16[idx];
+									SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] - vs1_data.i32[idx];
+									default: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx];
 								endcase
 							end
 						end
