@@ -316,7 +316,7 @@ module picorv32
 	    assign pcpi_vec_vs1 = vreg_pcpi_op1;
         assign pcpi_vec_vs2 = vreg_pcpi_op2;
         assign pcpi_vec_v0  = vregs[0];
-        
+   
     `endif // VECTOR_ENABLE
 
 	reg [63:0] count_cycle, count_instr;
@@ -1559,9 +1559,6 @@ module picorv32
 	reg [31:0] alu_add_sub;
 	reg [31:0] alu_shl, alu_shr;
 	reg alu_eq, alu_ltu, alu_lts;
-`ifdef VECTOR_ENABLE
-    reg [31:0] alu_vl;
-`endif
 
 	generate if (TWO_CYCLE_ALU) begin
 		always @(posedge clk) begin
@@ -1571,9 +1568,6 @@ module picorv32
 			alu_ltu <= reg_op1 < reg_op2;
 			alu_shl <= reg_op1 << reg_op2[4:0];
 			alu_shr <= $signed({instr_sra || instr_srai ? reg_op1[31] : 1'b0, reg_op1}) >>> reg_op2[4:0];
-		`ifdef VECTOR_ENABLE
-		    alu_vl <= reg_op2 / reg_op1;
-		`endif
 		end
 	end else begin
 		always @* begin
@@ -1583,9 +1577,6 @@ module picorv32
 			alu_ltu = reg_op1 < reg_op2;
 			alu_shl = reg_op1 << reg_op2[4:0];
 			alu_shr = $signed({instr_sra || instr_srai ? reg_op1[31] : 1'b0, reg_op1}) >>> reg_op2[4:0];
-		`ifdef VECTOR_ENABLE
-		    alu_vl  = reg_op2 / reg_op1;
-		`endif
 		end
 	end endgenerate
 
@@ -1624,12 +1615,6 @@ module picorv32
 				alu_out = alu_shl;
 			BARREL_SHIFTER && (instr_srl || instr_srli || instr_sra || instr_srai):
 				alu_out = alu_shr;
-			`ifdef VECTOR_ENABLE
-                (instr_vsetvli): begin
-                    alu_out = alu_vl;
-                    //vcsr_vl = alu_vl;
-                end
-            `endif
 		endcase
 
 `ifdef RISCV_FORMAL_BLACKBOX_ALU
@@ -1656,11 +1641,16 @@ module picorv32
 	reg [31:0] cpuregs_rs2;
 	reg [regindex_bits-1:0] decoded_rs;
 	
+	`ifdef VECTOR_ENABLE
+		reg [VLEN-1:0] vregs_wdata_masked;
+    	reg [VLEN-1:0] vregs_wdata_temporal;
+    `endif
+	
 	always @* begin // ESTE BLOQUE CONTROLA LA BANDERA DE ESCRITURA Y EL VALOR A ESCRIBIR
 	
     `ifdef VECTOR_ENABLE
-        vregs_write     = 0;
-        vregs_wdata     = 'bx;
+        vregs_write          = 0;
+        vregs_wdata_temporal = 'bx;
     `endif
 		cpuregs_write  = 0;
 		cpuregs_wrdata = 'bx;
@@ -1678,7 +1668,41 @@ module picorv32
 				end
 	        `ifdef VECTOR_ENABLE
 		        latched_vstore && !latched_branch: begin
-                    vregs_wdata = vreg_out;     // Resultado vectorial
+                    vregs_wdata_temporal = vreg_out;     // Resultado vectorial
+                    case(vsew) 
+						SEW8: begin
+						    for (int i = 0; i < VLEN/8; i = i + 1) begin
+						        if (vregs[0][i])
+						            vregs_wdata_masked[i*8 +: 8] = vregs_wdata_temporal[i*8 +: 8];
+						        else
+						            vregs_wdata_masked[i*8 +: 8] = vregs[latched_rd][i*8 +: 8];
+						    end
+						end
+						SEW16: begin
+						    for (int i = 0; i < VLEN/16; i = i + 1) begin
+						        if (vregs[0][i])
+						            vregs_wdata_masked[i*16 +: 16] = vregs_wdata_temporal[i*16 +: 16];
+						        else
+						            vregs_wdata_masked[i*16 +: 16] = vregs[latched_rd][i*16 +: 16];
+						    end
+						end
+						SEW32: begin
+						    for (int i = 0; i < VLEN/32; i = i + 1) begin
+						        if (vregs[0][i])
+						            vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
+						        else
+						            vregs_wdata_masked[i*32 +: 32] = vregs[latched_rd][i*32 +: 32];
+						    end
+						end
+						default: begin
+						    for (int i = 0; i < VLEN/32; i = i + 1) begin
+						        if (vregs[0][i])
+						            vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
+						        else
+						            vregs_wdata_masked[i*32 +: 32] = vregs[latched_rd][i*32 +: 32];
+						    end
+						end
+					endcase
                     vregs_write = 1;
                 end
             `endif 
@@ -1695,6 +1719,8 @@ module picorv32
 	end
 	
 	`ifdef VECTOR_ENABLE
+	
+	assign vregs_wdata = vm ? vregs_wdata_temporal : vregs_wdata_masked;
     // Registros temporales para operandos vectoriales
     reg [VLEN-1:0] vpuregs_vs1;
     reg [VLEN-1:0] vpuregs_vs2;
@@ -1702,37 +1728,7 @@ module picorv32
     // Bloque de escritura de registros vectoriales
     always @(posedge clk) begin
         if (resetn && vregs_write) begin
-            if (vm) begin // Sin enmascaramiento (vm=1)
-                vregs[latched_rd] <= vregs_wdata;
-            end else begin
-                // Escritura selectiva usando v0 (vregs[0]) como máscara según SEW
-                case (vsew)
-                    SEW8: begin // SEW = 8 bits
-                        for (int i = 0; i < VLEN/8; i = i + 1) begin
-                            if (vregs[0][i])
-                                vregs[latched_rd][i*8 +: 8] <= vregs_wdata[i*8 +: 8];
-                        end
-                    end
-                    SEW16: begin // SEW = 16 bits
-                        for (int i = 0; i < VLEN/16; i = i + 1) begin
-                            if (vregs[0][i])
-                                vregs[latched_rd][i*16 +: 16] <= vregs_wdata[i*16 +: 16];
-                        end
-                    end
-                    SEW32: begin // SEW = 32 bit0s
-                        for (int i = 0; i < VLEN/32; i = i + 1) begin
-                            if (vregs[0][i])
-                                vregs[latched_rd][i*32 +: 32] <= vregs_wdata[i*32 +: 32];
-                        end
-                    end
-                    default: begin
-                        for (int i = 0; i < VLEN/32; i = i + 1) begin
-                            if (vregs[0][i])
-                                vregs[latched_rd][i*32 +: 32] <= vregs_wdata[i*32 +: 32];
-                        end
-                    end
-                endcase
-            end
+        	vregs[latched_rd] <= vregs_wdata;
         end
     end
 
