@@ -152,7 +152,7 @@ module picorv32
 	parameter [ 0:0] BARREL_SHIFTER       = 0,
 	parameter [ 0:0] TWO_CYCLE_COMPARE    = 0,
 	parameter [ 0:0] TWO_CYCLE_ALU        = 0,
-	parameter [ 0:0] COMPRESSED_ISA       = 0,
+	parameter [ 0:0] COMPRESSED_ISA       = 1,
 	parameter [ 0:0] CATCH_MISALIGN       = 1,
 	parameter [ 0:0] CATCH_ILLINSN        = 1,
 	parameter [ 0:0] ENABLE_PCPI          = 0,
@@ -1174,7 +1174,7 @@ module picorv32
 		      vector_opcode <= major_opcodes_t'(mem_rdata_latched[6:0]);
 		      vm            <= /*1'b1;*/ mem_rdata_latched[25];      // Vector mask
               vfunc6        <= vfunct6_t'(mem_rdata_latched[31:26]); // Func6 para identificar operación
-              v_imm         <= $signed({{27{mem_rdata_q[19]}}, mem_rdata_q[19:15]});
+              v_imm         <= $signed({{27{mem_rdata_latched[19]}}, mem_rdata_latched[19:15]});
               vtype         <= mem_rdata_latched[30:20];
           `endif
 		
@@ -2015,18 +2015,6 @@ module picorv32
 					(CATCH_ILLINSN || WITH_PCPI) && instr_trap: begin
 						if (WITH_PCPI && (!is_vec_instr/* || instr_vsetvli*/)) begin
 							`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-							
-						/*`ifdef VECTOR_ENABLE
-						    if (instr_vsetvli) begin
-                                vsew       <= sew_t'(vtype[5:3]);
-                                vcsr_vtype <= {24'b0,1'b0,1'b0,vtype[5:3],3'b000};
-                                vcsr_vl    <= VLEN / (4*(2 << vtype[5:3]));
-                                SEW        <= 4*(2 << vtype[5:3]);
-                                reg_op1    <= 4*(2 << vtype[5:3]);  // Valor vl solicitado (rs1)
-                                reg_op2    <= VLEN;
-                            end
-						`endif*/
-							
 							reg_op1          <= cpuregs_rs1;
 							dbg_rs1val       <= cpuregs_rs1;
 							dbg_rs1val_valid <= 1;
@@ -2038,28 +2026,9 @@ module picorv32
 								dbg_rs2val       <= cpuregs_rs2;
 								dbg_rs2val_valid <= 1;
 								if (pcpi_int_ready) begin
-								
-								`ifdef VECTOR_ENABLE
-								    if (vfunc3 == OPCFG && vector_opcode == OP_V) begin
-								        if (decoded_rs1 != 0) begin
-								            if (pcpi_int_rd > cpuregs_rs1) begin
-								                reg_out <= 11;
-								                vcsr_vl <= 0;
-								            end else begin
-								                reg_out <= 12;
-								                vcsr_vl <= 0;
-								             end
-								        end else if (decoded_rs1 == 0 && decoded_rd != 0) begin
-								            reg_out <= 13;
-								            vcsr_vl <= pcpi_int_rd;
-								        end else reg_out <= 14;
-								    end else 
-								`endif
-								    begin 
-                                        reg_out       <= 15;
-                                    end
                                     mem_do_rinst  <= 1;
                                     pcpi_valid    <= 0;
+                                    reg_out       <= pcpi_int_rd;
                                     latched_store <= pcpi_int_wr;
                                     cpu_state     <= cpu_state_fetch;
 								end else
