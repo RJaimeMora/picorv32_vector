@@ -1669,38 +1669,35 @@ module picorv32
 	        `ifdef VECTOR_ENABLE
 		        latched_vstore && !latched_branch: begin
                     vregs_wdata_temporal = vreg_out;     // Resultado vectorial
+                    if (vfunc6[4:3] == 2'b11) vregs_wdata_masked   = vregs[latched_rd];
                     case(vsew) 
 						SEW8: begin
-						    for (int i = 0; i < VLEN/8; i = i + 1) begin
-						        if (vregs[0][i])
-						            vregs_wdata_masked[i*8 +: 8] = vregs_wdata_temporal[i*8 +: 8];
-						        else
-						            vregs_wdata_masked[i*8 +: 8] = vregs[latched_rd][i*8 +: 8];
-						    end
+							for (int i = 0; i < VLEN/8; i = i + 1) begin
+								if (vfunc6[4:3] == 2'b11)  vregs_wdata_masked[i]        = vregs_wdata_temporal[i];
+								else if (vregs[0][i])      vregs_wdata_masked[i*8 +: 8] = vregs_wdata_temporal[i*8 +: 8];
+								else                       vregs_wdata_masked[i*8 +: 8] = vregs[latched_rd][i*8 +: 8];
+							end
 						end
 						SEW16: begin
-						    for (int i = 0; i < VLEN/16; i = i + 1) begin
-						        if (vregs[0][i])
-						            vregs_wdata_masked[i*16 +: 16] = vregs_wdata_temporal[i*16 +: 16];
-						        else
-						            vregs_wdata_masked[i*16 +: 16] = vregs[latched_rd][i*16 +: 16];
-						    end
+							for (int i = 0; i < VLEN/16; i = i + 1) begin
+								if (vfunc6[4:3] == 2'b11)  vregs_wdata_masked[i]          = vregs_wdata_temporal[i];
+								else if (vregs[0][i])      vregs_wdata_masked[i*16 +: 16] = vregs_wdata_temporal[i*16 +: 16];
+								else                       vregs_wdata_masked[i*16 +: 16] = vregs[latched_rd][i*16 +: 16];
+							end
 						end
 						SEW32: begin
-						    for (int i = 0; i < VLEN/32; i = i + 1) begin
-						        if (vregs[0][i])
-						            vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
-						        else
-						            vregs_wdata_masked[i*32 +: 32] = vregs[latched_rd][i*32 +: 32];
-						    end
+							for (int i = 0; i < VLEN/32; i = i + 1) begin
+								if (vfunc6[4:3] == 2'b11)  vregs_wdata_masked[i]          = vregs_wdata_temporal[i];
+								else if (vregs[0][i])      vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
+								else                       vregs_wdata_masked[i*32 +: 32] = vregs[latched_rd][i*32 +: 32];
+							end
 						end
 						default: begin
-						    for (int i = 0; i < VLEN/32; i = i + 1) begin
-						        if (vregs[0][i])
-						            vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
-						        else
-						            vregs_wdata_masked[i*32 +: 32] = vregs[latched_rd][i*32 +: 32];
-						    end
+							for (int i = 0; i < VLEN/32; i = i + 1) begin
+								if (vfunc6[4:3] == 2'b11)  vregs_wdata_masked[i]          = vregs_wdata_temporal[i];
+								else if (vregs[0][i])      vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
+								else                       vregs_wdata_masked[i*32 +: 32] = vregs[latched_rd][i*32 +: 32];
+							end
 						end
 					endcase
                     vregs_write = 1;
@@ -1720,7 +1717,8 @@ module picorv32
 	
 	`ifdef VECTOR_ENABLE
 	
-	assign vregs_wdata = vm ? vregs_wdata_temporal : vregs_wdata_masked;
+	assign vregs_wdata = vm ? ( (vfunc6[4:3] == 2'b11) ? vregs_wdata_masked : vregs_wdata_temporal ) : ((vfunc6 == VADC || vfunc6 == VSBC) ? vregs_wdata_temporal : vregs_wdata_masked);
+
     // Registros temporales para operandos vectoriales
     reg [VLEN-1:0] vpuregs_vs1;
     reg [VLEN-1:0] vpuregs_vs2;
@@ -2946,7 +2944,6 @@ endmodule
 
 module picorv32_pcpi_div (
 	input clk, resetn,
-
 	input             pcpi_valid,
 	input      [31:0] pcpi_insn,
 	input      [31:0] pcpi_rs1,
@@ -3062,9 +3059,13 @@ import rv_vector_pkg::*;
     output reg            pcpi_wait,
     output reg            pcpi_ready
 );
-    // Decodificación de instrucciones vectoriales
-    reg instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv, instr_vsbc, instr_vminu, instr_vmaxu;
-    wire instr_any_vec = |{instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vmv, instr_vsbc, instr_vminu, instr_vmaxu};
+    
+    reg instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vxor, instr_vsbc, instr_vadc, 
+    	instr_vmv, instr_vminu, instr_vmaxu, instr_vmseq, instr_vmsne, instr_vmsltu, instr_vmslt, instr_vmsleu, instr_vmsle,
+    	instr_vsll, instr_vsrl, instr_vsra;
+    wire instr_any_vec = |{instr_vadd, instr_vsub, instr_vand, instr_vor, instr_vsbc, instr_vadc,
+    	instr_vxor, instr_vmv, instr_vminu, instr_vmaxu, instr_vmseq, instr_vmsne, instr_vmsltu, instr_vmslt, instr_vmsleu, instr_vmsle,
+    	instr_vsll, instr_vsrl, instr_vsra};
     
     // Detección de transición en pcpi_wait para iniciar operación
     reg pcpi_wait_q;
@@ -3108,27 +3109,47 @@ import rv_vector_pkg::*;
     
     // Decodificación de instrucciones en cada ciclo
     always @(posedge clk) begin
-        instr_vadd  <= 0;
-        instr_vsub  <= 0;
-        instr_vand  <= 0;
-        instr_vor   <= 0;
-        instr_vxor  <= 0;
-        instr_vmv   <= 0;
-        instr_vsbc  <= 0;
-        instr_vminu <= 0;
-        instr_vmaxu <= 0;
+        instr_vadd   <= 0;
+        instr_vsub   <= 0;
+        instr_vand   <= 0;
+        instr_vor    <= 0;
+        instr_vxor   <= 0;
+        instr_vmv    <= 0;
+        instr_vsbc   <= 0;
+        instr_vadc   <= 0;
+        instr_vminu  <= 0;
+        instr_vmaxu  <= 0;
+        instr_vmseq  <= 0;
+        instr_vmsne  <= 0;
+        instr_vmsltu <= 0;
+        instr_vmslt  <= 0;
+        instr_vmsleu <= 0;
+        instr_vmsle  <= 0;
+        instr_vsll   <= 0;
+		instr_vsrl   <= 0;
+		instr_vsra   <= 0;
         
         if (resetn && pcpi_valid && pcpi_insn[6:0] == OP_V) begin
             case (vfunc6)
-                VADD  : instr_vadd  <= 1;
-                VSUB  : instr_vsub  <= 1;
-                VAND  : instr_vand  <= 1;
-                VOR   : instr_vor   <= 1;
-                VXOR  : instr_vxor  <= 1;
-                VMV   : instr_vmv   <= 1;
-                VSBC  : instr_vsbc  <= !vm;
-                VMINU : instr_vminu <= 1;
-                VMAXU : instr_vmaxu <= 1;
+                VADD   : instr_vadd   <= 1;
+                VSUB   : instr_vsub   <= 1;
+                VAND   : instr_vand   <= 1;
+                VOR    : instr_vor    <= 1;
+                VXOR   : instr_vxor   <= 1;
+                VMV    : instr_vmv    <= 1;
+                VSBC   : instr_vsbc   <= !vm;
+                VADC   : instr_vadc   <= !vm;
+                VMINU  : instr_vminu  <= 1;
+                VMAXU  : instr_vmaxu  <= 1;
+                VMSEQ  : instr_vmseq  <= 1;
+                VMSNE  : instr_vmsne  <= 1;
+                VMSLTU : instr_vmsltu <= 1;
+                VMSLT  : instr_vmslt  <= 1;
+                VMSLEU : instr_vmsleu <= 1;
+                VMSLE  : instr_vmsle  <= 1;
+                VSLL   : instr_vsll   <= 1;
+            	VSRL   : instr_vsrl   <= 1;
+            	VSRA   : instr_vsra   <= 1;
             endcase
         end
         
@@ -3240,20 +3261,6 @@ import rv_vector_pkg::*;
                         end
                     end
                     
-                    instr_vmv: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
-                            idx = vl - vec_counter + i;
-                            if (idx >= 0 && idx < vl) begin
-                                case (vsew)
-                                    SEW8:  result_data.i8[idx]    <= vs1_data.i8[idx];
-                                    SEW16: result_data.i16[idx]   <= vs1_data.i16[idx];
-                                    SEW32: result_data.i32[idx]   <= vs1_data.i32[idx];
-                                    default: result_data.i32[idx] <= vs1_data.i32[idx];
-                                endcase
-                            end
-                        end
-                    end
-                    
                     instr_vsbc: begin
                         for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
@@ -3263,6 +3270,34 @@ import rv_vector_pkg::*;
                                     SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] - vs1_data.i16[idx] - v0_data[idx];
                                     SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] - vs1_data.i32[idx] - v0_data[idx];
                                     default: result_data.i32[idx] <= vs2_data.i32[idx] - vs1_data.i32[idx] - v0_data[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
+                    instr_vadc: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]    <= vs2_data.i8[idx]  + vs1_data.i8[idx]  + v0_data[idx];
+                                    SEW16: result_data.i16[idx]   <= vs2_data.i16[idx] + vs1_data.i16[idx] + v0_data[idx];
+                                    SEW32: result_data.i32[idx]   <= vs2_data.i32[idx] + vs1_data.i32[idx] + v0_data[idx];
+                                    default: result_data.i32[idx] <= vs2_data.i32[idx] + vs1_data.i32[idx] + v0_data[idx];
+                                endcase
+                            end
+                        end
+                    end
+                    
+                    instr_vmv: begin
+                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                            idx = vl - vec_counter + i;
+                            if (idx >= 0 && idx < vl) begin
+                                case (vsew)
+                                    SEW8:  result_data.i8[idx]    <= vs1_data.i8[idx];
+                                    SEW16: result_data.i16[idx]   <= vs1_data.i16[idx];
+                                    SEW32: result_data.i32[idx]   <= vs1_data.i32[idx];
+                                    default: result_data.i32[idx] <= vs1_data.i32[idx];
                                 endcase
                             end
                         end
@@ -3295,6 +3330,133 @@ import rv_vector_pkg::*;
 							end
 						end
 					end
+					
+					instr_vmseq: begin
+		                for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+		                    idx = vl - vec_counter + i;
+		                    if (idx >= 0 && idx < vl) begin
+		                        case (vsew)
+		                            SEW8:    result_data[idx] <= (vs2_data.i8[idx]  == vs1_data.i8[idx])  ? 1'b1 : 1'b0;
+		                            SEW16:   result_data[idx] <= (vs2_data.i16[idx] == vs1_data.i16[idx]) ? 1'b1 : 1'b0;
+		                            SEW32:   result_data[idx] <= (vs2_data.i32[idx] == vs1_data.i32[idx]) ? 1'b1 : 1'b0;
+		                            default: result_data[idx] <= (vs2_data.i32[idx] == vs1_data.i32[idx]) ? 1'b1 : 1'b0;
+		                        endcase
+		                    end
+		                end
+                	end
+                	
+                	instr_vmsne: begin
+		                for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+		                    idx = vl - vec_counter + i;
+		                    if (idx >= 0 && idx < vl) begin
+		                        case (vsew)
+		                            SEW8:    result_data[idx] <= (vs2_data.i8[idx]  == vs1_data.i8[idx])  ? 1'b0 : 1'b1;
+		                            SEW16:   result_data[idx] <= (vs2_data.i16[idx] == vs1_data.i16[idx]) ? 1'b0 : 1'b1;
+		                            SEW32:   result_data[idx] <= (vs2_data.i32[idx] == vs1_data.i32[idx]) ? 1'b0 : 1'b1;
+		                            default: result_data[idx] <= (vs2_data.i32[idx] == vs1_data.i32[idx]) ? 1'b0 : 1'b1;
+		                        endcase
+		                    end
+		                end
+                	end
+                	
+                	instr_vmsltu: begin
+						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+							idx = vl - vec_counter + i;
+							if (idx >= 0 && idx < vl) begin
+								case (vsew)
+									SEW8:    result_data[idx] <= (vs2_data.i8[idx]  < vs1_data.i8[idx])  ? 1'b1 : 1'b0;
+									SEW16:   result_data[idx] <= (vs2_data.i16[idx] < vs1_data.i16[idx]) ? 1'b1 : 1'b0;
+									SEW32:   result_data[idx] <= (vs2_data.i32[idx] < vs1_data.i32[idx]) ? 1'b1 : 1'b0;
+									default: result_data[idx] <= (vs2_data.i32[idx] < vs1_data.i32[idx]) ? 1'b1 : 1'b0;
+								endcase
+							end
+						end
+					end
+					
+					instr_vmslt: begin
+						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+							idx = vl - vec_counter + i;
+							if (idx >= 0 && idx < vl) begin
+								case (vsew)
+									SEW8:    result_data[idx] <= ($signed(vs2_data.i8[idx])  < $signed(vs1_data.i8[idx]))  ? 1'b1 : 1'b0;
+									SEW16:   result_data[idx] <= ($signed(vs2_data.i16[idx]) < $signed(vs1_data.i16[idx])) ? 1'b1 : 1'b0;
+									SEW32:   result_data[idx] <= ($signed(vs2_data.i32[idx]) < $signed(vs1_data.i32[idx])) ? 1'b1 : 1'b0;
+									default: result_data[idx] <= ($signed(vs2_data.i32[idx]) < $signed(vs1_data.i32[idx])) ? 1'b1 : 1'b0;
+								endcase
+							end
+						end
+					end
+					
+					instr_vmsleu: begin
+						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+							idx = vl - vec_counter + i;
+							if (idx >= 0 && idx < vl) begin
+								case (vsew)
+									SEW8:    result_data[idx] <= (vs2_data.i8[idx]  <= vs1_data.i8[idx])  ? 1'b1 : 1'b0;
+									SEW16:   result_data[idx] <= (vs2_data.i16[idx] <= vs1_data.i16[idx]) ? 1'b1 : 1'b0;
+									SEW32:   result_data[idx] <= (vs2_data.i32[idx] <= vs1_data.i32[idx]) ? 1'b1 : 1'b0;
+									default: result_data[idx] <= (vs2_data.i32[idx] <= vs1_data.i32[idx]) ? 1'b1 : 1'b0;
+								endcase
+							end
+						end
+					end
+					
+					instr_vmsle: begin
+						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+							idx = vl - vec_counter + i;
+							if (idx >= 0 && idx < vl) begin
+								case (vsew)
+									SEW8:    result_data[idx] <= ($signed(vs2_data.i8[idx])  <= $signed(vs1_data.i8[idx]))  ? 1'b1 : 1'b0;
+									SEW16:   result_data[idx] <= ($signed(vs2_data.i16[idx]) <= $signed(vs1_data.i16[idx])) ? 1'b1 : 1'b0;
+									SEW32:   result_data[idx] <= ($signed(vs2_data.i32[idx]) <= $signed(vs1_data.i32[idx])) ? 1'b1 : 1'b0;
+									default: result_data[idx] <= ($signed(vs2_data.i32[idx]) <= $signed(vs1_data.i32[idx])) ? 1'b1 : 1'b0;
+								endcase
+							end
+						end
+					end
+					
+					instr_vsll: begin
+				        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+				            idx = vl - vec_counter + i;
+				            if (idx >= 0 && idx < vl) begin
+				                case (vsew)
+				                    SEW8:    result_data.i8[idx]  <= vs2_data.i8[idx]  << vs1_data.i8[idx][2:0];
+				                    SEW16:   result_data.i16[idx] <= vs2_data.i16[idx] << vs1_data.i16[idx][3:0];
+				                    SEW32:   result_data.i32[idx] <= vs2_data.i32[idx] << vs1_data.i32[idx][4:0];
+				                    default: result_data.i32[idx] <= vs2_data.i32[idx] << vs1_data.i32[idx][4:0];
+				                endcase
+				            end
+				        end
+				    end
+				    
+				    instr_vsrl: begin
+						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+							idx = vl - vec_counter + i;
+							if (idx >= 0 && idx < vl) begin
+								case (vsew)
+									SEW8:    result_data.i8[idx]  <= vs2_data.i8[idx]  >> vs1_data.i8[idx][2:0];
+									SEW16:   result_data.i16[idx] <= vs2_data.i16[idx] >> vs1_data.i16[idx][3:0];
+									SEW32:   result_data.i32[idx] <= vs2_data.i32[idx] >> vs1_data.i32[idx][4:0];
+									default: result_data.i32[idx] <= vs2_data.i32[idx] >> vs1_data.i32[idx][4:0];
+								endcase
+							end
+						end
+					end
+
+					instr_vsra: begin
+						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+							idx = vl - vec_counter + i;
+							if (idx >= 0 && idx < vl) begin
+								case (vsew)
+									SEW8:    result_data.i8[idx]  <= $signed(vs2_data.i8[idx])  >>> vs1_data.i8[idx][2:0];
+									SEW16:   result_data.i16[idx] <= $signed(vs2_data.i16[idx]) >>> vs1_data.i16[idx][3:0];
+									SEW32:   result_data.i32[idx] <= $signed(vs2_data.i32[idx]) >>> vs1_data.i32[idx][4:0];
+									default: result_data.i32[idx] <= $signed(vs2_data.i32[idx]) >>> vs1_data.i32[idx][4:0];
+								endcase
+							end
+						end
+					end
+
                     
                 endcase
                 
@@ -3370,20 +3532,16 @@ module picorv32_axi #(
 	input         mem_axi_awready,
 	output [31:0] mem_axi_awaddr,
 	output [ 2:0] mem_axi_awprot,
-
 	output        mem_axi_wvalid,
 	input         mem_axi_wready,
 	output [31:0] mem_axi_wdata,
 	output [ 3:0] mem_axi_wstrb,
-
 	input         mem_axi_bvalid,
 	output        mem_axi_bready,
-
 	output        mem_axi_arvalid,
 	input         mem_axi_arready,
 	output [31:0] mem_axi_araddr,
 	output [ 2:0] mem_axi_arprot,
-
 	input         mem_axi_rvalid,
 	output        mem_axi_rready,
 	input  [31:0] mem_axi_rdata,
@@ -3557,20 +3715,16 @@ module picorv32_axi_adapter (
 	input         mem_axi_awready,
 	output [31:0] mem_axi_awaddr,
 	output [ 2:0] mem_axi_awprot,
-
 	output        mem_axi_wvalid,
 	input         mem_axi_wready,
 	output [31:0] mem_axi_wdata,
 	output [ 3:0] mem_axi_wstrb,
-
 	input         mem_axi_bvalid,
 	output        mem_axi_bready,
-
 	output        mem_axi_arvalid,
 	input         mem_axi_arready,
 	output [31:0] mem_axi_araddr,
 	output [ 2:0] mem_axi_arprot,
-
 	input         mem_axi_rvalid,
 	output        mem_axi_rready,
 	input  [31:0] mem_axi_rdata,
