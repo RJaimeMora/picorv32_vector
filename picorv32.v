@@ -1155,11 +1155,11 @@ module picorv32
 		is_compare                         <= |{is_beq_bne_blt_bge_bltu_bgeu, instr_slti, instr_slt, instr_sltiu, instr_sltu};
 		`ifdef VECTOR_ENABLE
 		    is_vec_instr  <= |{vector_opcode == OP_V, vector_opcode == LOAD_FP, vector_opcode == STORE_FP};
-            is_vec_arth   <= vector_opcode == OP_V && vfunc3 != OPCFG;
-            is_vec_load   <= vector_opcode == LOAD_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[28:26] == 3'b000;
-            is_vec_store  <= vector_opcode == STORE_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[28:26] == 3'b000;
-            is_vec_cfg    <= vector_opcode == OP_V && vfunc3 == OPCFG;
-            is_vsetimm    <= vector_opcode == OP_V && vfunc3 == OPCFG && mem_rdata_latched[31] == 0;
+            is_vec_arth   <= vector_opcode  == OP_V && vfunc3 != OPCFG;
+            is_vec_load   <= vector_opcode  == LOAD_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[28:26] == 3'b000;
+            is_vec_store  <= vector_opcode  == STORE_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[28:26] == 3'b000;
+            is_vec_cfg    <= vector_opcode  == OP_V && vfunc3 == OPCFG;
+            is_vsetimm    <= vector_opcode  == OP_V && vfunc3 == OPCFG && mem_rdata_latched[31] == 0;
               
             is_vec_vv     <= vfunc3 == OPIVV;  // Vector-Vector
             is_vec_vx     <= vfunc3 == OPIVX;  // Vector-Scalar
@@ -1354,6 +1354,8 @@ module picorv32
 		`ifdef VECTOR_ENABLE
 	        pcpi_vec_insn <= ENABLE_VEC ? mem_rdata_q : 'bx;
 	        instr_vsetvli <= is_vec_cfg && !mem_rdata_q[31]; // vsetvli cuando el bit 31 es 0
+	        instr_vle     <= is_vec_load;
+    		instr_vse     <= is_vec_store;
         `endif
 
 			instr_beq   <= is_beq_bne_blt_bge_bltu_bgeu && mem_rdata_q[14:12] == 3'b000;
@@ -1733,10 +1735,6 @@ module picorv32
 
     // Bloque de lectura de registros vectoriales
     always @* begin
-        // Valores por defecto
-        //vpuregs_vs1 = 'bx;
-        //vpuregs_vs2 = 'bx;
-
         // Leer operandos vectoriales 
         vpuregs_vs1 = vregs[decoded_rs1];
         vpuregs_vs2 = vregs[decoded_rs2];
@@ -1811,15 +1809,15 @@ module picorv32
 	assign launch_next_insn = cpu_state == cpu_state_fetch && decoder_trigger && (!ENABLE_IRQ || irq_delay || irq_active || !(irq_pending & ~irq_mask));
 
 	always @(posedge clk) begin
-		trap <= 0;
-		reg_sh <= 'bx;
+		trap    <= 0;
+		reg_sh  <= 'bx;
 		reg_out <= 'bx;
 		set_mem_do_rinst = 0;
 		set_mem_do_rdata = 0;
 		set_mem_do_wdata = 0;
 
 		alu_out_0_q <= alu_out_0;
-		alu_out_q <= alu_out;
+		alu_out_q   <= alu_out;
 
 		alu_wait <= 0;
 		alu_wait_2 <= 0;
@@ -1968,8 +1966,7 @@ module picorv32
 						latched_store <= 1;
 						reg_out <= irq_pending;
 						reg_next_pc <= current_pc + (compressed_instr ? 2 : 4);
-			
-                            // Interfaz de memoria para operaciones de			mem_do_rinst <= 1;
+						mem_do_rinst <= 1;
 					end else
 						do_waitirq <= 1;
 				end else
@@ -2004,8 +2001,6 @@ module picorv32
 				`ifdef VECTOR_ENABLE
 				  vreg_pcpi_op1  <= 'bx;
 				  vreg_pcpi_op2  <= 'bx;
-			
-                      // Interfaz de memoria para operaciones de	  vreg_op2 <= 'bx;
 				`endif
 
 				(* parallel_case *)
@@ -2045,93 +2040,98 @@ module picorv32
 						end 
 						`ifdef VECTOR_ENABLE
 						else if (WITH_PCPI && is_vec_instr) begin
-						    case (vfunc3)
-                                OPIVV: begin // Vector-Vector
-                                    vreg_pcpi_op1  <= vpuregs_vs1;
-                                    vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
-                                    pcpi_vec_valid <= 1;
-                                    //pcpi_vec_insn <= pcpi_insn;
-                                end
-                                OPIVX: begin // Vector-Scalar
-                                    // Convertir el escalar a un vector donde cada elemento es el valor escalar
-                                    case (vsew)
-                                        SEW8: for (integer i = 0; i < VLEN/8; i=i+1)
-                                            vreg_pcpi_op1[i*8 +: 8] <= cpuregs_rs1[7:0];
-                                        SEW16: for (integer i = 0; i < VLEN/16; i=i+1)
-                                            vreg_pcpi_op1[i*16 +: 16] <= cpuregs_rs1[15:0];
-                                        SEW32: for (integer i = 0; i < VLEN/32; i=i+1)
-                                            vreg_pcpi_op1[i*32 +: 32] <= cpuregs_rs1;
-                                        default: vreg_pcpi_op1 <= 'bx;
-                                    endcase
-                                    vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
-                                    pcpi_vec_valid <= 1;
-                                end 
-                                OPIVI: begin // Vector-Immediate   
-                                    case (vsew)
-                                        SEW8: begin
-                                            for (integer i = 0; i < VLEN/8; i=i+1)
-                                                vreg_pcpi_op1[i*8 +: 8] <= v_imm[7:0];
-                                        end
-                                        SEW16: begin
-                                            for (integer i = 0; i < VLEN/16; i=i+1)
-                                                vreg_pcpi_op1[i*16 +: 16] <= v_imm[15:0];
-                                        end
-                                        SEW32: begin
-                                            for (integer i = 0; i < VLEN/32; i=i+1)
-                                                vreg_pcpi_op1[i*32 +: 32] <= v_imm;
-                                        end
-                                        default: begin
-                                            vreg_pcpi_op1 <= 'bx;
-                                        end
-                                    endcase
-                                    vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
-                                    pcpi_vec_valid <= 1;
-                                end
-                                OPCFG: begin // Instrucción de configuración
-                                    // Cargar los registros necesarios (para vsetvli)
-                                    pcpi_valid <= 1;
-                                    vsew       <= sew_t'(vtype[5:3]);
-                                    vcsr_vtype <= {24'b0,1'b0,1'b0,vtype[5:3],3'b000};
-                                    //vcsr_vl    <= VLEN / (4*(2 << vtype[5:3]));
-                                    SEW        <= 8 << vtype[5:3];
-                                    reg_op1    <= VLEN;  // Valor vl para calcular VLMAX
-                                    reg_op2    <= 8 << vtype[5:3]; // Valor de SEW para calcular VLMAX
-                                    
-                                    // Avanzar al estado exec para realizar la configuración
-                                    if (pcpi_int_ready) begin
-                                        if (decoded_rs1 != 0) begin
-								            if (pcpi_int_rd > cpuregs_rs1) begin
-								                reg_out <= cpuregs_rs1;
-								                vcsr_vl <= cpuregs_rs1;
-								            end else begin
-								                reg_out <= pcpi_int_rd;
-								                vcsr_vl <= pcpi_int_rd;
-								             end
-								        end else if (decoded_rs1 == 0 && decoded_rd != 0) begin
-								            reg_out <= pcpi_int_rd;
-								            vcsr_vl <= pcpi_int_rd;
-								        end else begin
-								            reg_out <= vcsr_vl;
-								        end
-                                        mem_do_rinst  <= 1;
-                                        pcpi_valid    <= 0;
-                                        //reg_out       <= 10;
-                                        latched_store <= pcpi_int_wr;
-                                        cpu_state     <= cpu_state_fetch;
-                                    end
-                                end 
-                                default: begin
-                                    vreg_pcpi_op1 <= 'bx;
-                                    vreg_pcpi_op2 <= 'bx;
-                                end
-                            endcase 
-						    
-						    if (pcpi_int_ready) begin
-                                mem_do_rinst   <= 1;
-                                pcpi_vec_valid <= 0;
-                                vreg_out       <= pcpi_int_vd;
-                                latched_vstore <= pcpi_int_wr;
-                                cpu_state      <= cpu_state_fetch;
+							if (is_vec_arth || is_vec_cfg) begin
+								case (vfunc3)
+		                            OPIVV: begin // Vector-Vector
+		                                vreg_pcpi_op1  <= vpuregs_vs1;
+		                                vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
+		                                pcpi_vec_valid <= 1;
+		                                //pcpi_vec_insn <= pcpi_insn;
+		                            end
+		                            OPIVX: begin // Vector-Scalar
+		                                // Convertir el escalar a un vector donde cada elemento es el valor escalar
+		                                case (vsew)
+		                                    SEW8: for (integer i = 0; i < VLEN/8; i=i+1)
+		                                        vreg_pcpi_op1[i*8 +: 8] <= cpuregs_rs1[7:0];
+		                                    SEW16: for (integer i = 0; i < VLEN/16; i=i+1)
+		                                        vreg_pcpi_op1[i*16 +: 16] <= cpuregs_rs1[15:0];
+		                                    SEW32: for (integer i = 0; i < VLEN/32; i=i+1)
+		                                        vreg_pcpi_op1[i*32 +: 32] <= cpuregs_rs1;
+		                                    default: vreg_pcpi_op1 <= 'bx;
+		                                endcase
+		                                vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
+		                                pcpi_vec_valid <= 1;
+		                            end 
+		                            OPIVI: begin // Vector-Immediate   
+		                                case (vsew)
+		                                    SEW8: begin
+		                                        for (integer i = 0; i < VLEN/8; i=i+1)
+		                                            vreg_pcpi_op1[i*8 +: 8] <= v_imm[7:0];
+		                                    end
+		                                    SEW16: begin
+		                                        for (integer i = 0; i < VLEN/16; i=i+1)
+		                                            vreg_pcpi_op1[i*16 +: 16] <= v_imm[15:0];
+		                                    end
+		                                    SEW32: begin
+		                                        for (integer i = 0; i < VLEN/32; i=i+1)
+		                                            vreg_pcpi_op1[i*32 +: 32] <= v_imm;
+		                                    end
+		                                    default: begin
+		                                        vreg_pcpi_op1 <= 'bx;
+		                                    end
+		                                endcase
+		                                vreg_pcpi_op2  <= (vfunc6 == VMV) ? '0 : vpuregs_vs2;
+		                                pcpi_vec_valid <= 1;
+		                            end
+		                            OPCFG: begin // Instrucción de configuración
+		                                // Cargar los registros necesarios (para vsetvli)
+		                                pcpi_valid <= 1;
+		                                vsew       <= sew_t'(vtype[5:3]);
+		                                vcsr_vtype <= {24'b0,1'b0,1'b0,vtype[5:3],3'b000};
+		                                SEW        <= 8 << vtype[5:3];
+		                                reg_op1    <= VLEN;  // Valor vl para calcular VLMAX
+		                                reg_op2    <= 8 << vtype[5:3]; // Valor de SEW para calcular VLMAX
+		                                
+		                                // Avanzar al estado exec para realizar la configuración
+		                                if (pcpi_int_ready) begin
+		                                    if (decoded_rs1 != 0) begin
+										        if (pcpi_int_rd > cpuregs_rs1) begin
+										            reg_out <= cpuregs_rs1;
+										            vcsr_vl <= cpuregs_rs1;
+										        end else begin
+										            reg_out <= pcpi_int_rd;
+										            vcsr_vl <= pcpi_int_rd;
+										         end
+										    end else if (decoded_rs1 == 0 && decoded_rd != 0) begin
+										        reg_out <= pcpi_int_rd;
+										        vcsr_vl <= pcpi_int_rd;
+										    end else begin
+										        reg_out <= vcsr_vl;
+										    end
+		                                    mem_do_rinst  <= 1;
+		                                    pcpi_valid    <= 0;
+		                                    latched_store <= pcpi_int_wr;
+		                                    cpu_state     <= cpu_state_fetch;
+		                                end
+		                            end 
+		                            default: begin
+		                                vreg_pcpi_op1 <= 'bx;
+		                                vreg_pcpi_op2 <= 'bx;
+		                            end
+		                        endcase 
+								
+								if (pcpi_int_ready) begin
+		                            mem_do_rinst   <= 1;
+		                            pcpi_vec_valid <= 0;
+		                            vreg_out       <= pcpi_int_vd;
+		                            latched_vstore <= pcpi_int_wr;
+		                            cpu_state      <= cpu_state_fetch;
+								end
+						    end else if (is_vec_load || is_vec_store) begin
+						    	reg_op1      <= cpuregs_rs1;
+						    	mem_do_rinst <= 1;
+						    	if (is_vec_load) cpu_state <= cpu_state_ldmem;
+						    	else             cpu_state <= cpu_state_stmem;
 						    end
 						end 
 						`endif
@@ -2331,8 +2331,8 @@ module picorv32
                     mem_do_rinst <= mem_do_prefetch && !alu_wait_2;
                     alu_wait <= alu_wait_2;
                 end else if (is_beq_bne_blt_bge_bltu_bgeu) begin
-                    latched_rd <= 0;
-                    latched_store <= TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0;
+                    latched_rd     <= 0;
+                    latched_store  <= TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0;
                     latched_branch <= TWO_CYCLE_COMPARE ? alu_out_0_q : alu_out_0;
                     if (mem_done)
                         cpu_state <= cpu_state_fetch;
@@ -3158,12 +3158,15 @@ import rv_vector_pkg::*;
         pcpi_wait_q <= pcpi_wait && resetn;
     end
     
+    localparam ELEM_P_CICLO = 8;
+    
     // Cálculo del vector length basado en SEW
     always @* begin
         
         // Cálculo del tamaño del lote
-        batch_size = (vec_counter >= 16) ? 16'd16 : vec_counter[15:0];
+        batch_size = (vec_counter >= ELEM_P_CICLO) ? ELEM_P_CICLO : vec_counter[15:0];
     end
+
     
     // Bloque principal de procesamiento (similar a pcpi_mul)
     always @(posedge clk) begin
@@ -3191,7 +3194,7 @@ import rv_vector_pkg::*;
             if (vec_counter > 0) begin
                 case (1'b1)
                     instr_vadd: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
@@ -3205,7 +3208,7 @@ import rv_vector_pkg::*;
                     end
                     
                     instr_vsub: begin
-						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+						for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
@@ -3220,7 +3223,7 @@ import rv_vector_pkg::*;
 
                     
                     instr_vand: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
@@ -3234,7 +3237,7 @@ import rv_vector_pkg::*;
                     end
                     
                     instr_vor: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
@@ -3248,7 +3251,7 @@ import rv_vector_pkg::*;
                     end
                     
                     instr_vxor: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
@@ -3262,7 +3265,7 @@ import rv_vector_pkg::*;
                     end
                     
                     instr_vsbc: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
@@ -3276,7 +3279,7 @@ import rv_vector_pkg::*;
                     end
                     
                     instr_vadc: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
@@ -3290,7 +3293,7 @@ import rv_vector_pkg::*;
                     end
                     
                     instr_vmv: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
@@ -3304,7 +3307,7 @@ import rv_vector_pkg::*;
                     end
                     
                     instr_vminu: begin
-                        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+                        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
                             idx = vl - vec_counter + i;
                             if (idx >= 0 && idx < vl) begin
                                 case (vsew)
@@ -3318,7 +3321,7 @@ import rv_vector_pkg::*;
                     end
                     
                     instr_vmaxu: begin
-						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+						for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
@@ -3332,7 +3335,7 @@ import rv_vector_pkg::*;
 					end
 					
 					instr_vmseq: begin
-		                for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+		                for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 		                    idx = vl - vec_counter + i;
 		                    if (idx >= 0 && idx < vl) begin
 		                        case (vsew)
@@ -3346,7 +3349,7 @@ import rv_vector_pkg::*;
                 	end
                 	
                 	instr_vmsne: begin
-		                for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+		                for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 		                    idx = vl - vec_counter + i;
 		                    if (idx >= 0 && idx < vl) begin
 		                        case (vsew)
@@ -3360,7 +3363,7 @@ import rv_vector_pkg::*;
                 	end
                 	
                 	instr_vmsltu: begin
-						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+						for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
@@ -3374,7 +3377,7 @@ import rv_vector_pkg::*;
 					end
 					
 					instr_vmslt: begin
-						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+						for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
@@ -3388,7 +3391,7 @@ import rv_vector_pkg::*;
 					end
 					
 					instr_vmsleu: begin
-						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+						for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
@@ -3402,7 +3405,7 @@ import rv_vector_pkg::*;
 					end
 					
 					instr_vmsle: begin
-						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+						for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
@@ -3416,7 +3419,7 @@ import rv_vector_pkg::*;
 					end
 					
 					instr_vsll: begin
-				        for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+				        for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 				            idx = vl - vec_counter + i;
 				            if (idx >= 0 && idx < vl) begin
 				                case (vsew)
@@ -3430,7 +3433,7 @@ import rv_vector_pkg::*;
 				    end
 				    
 				    instr_vsrl: begin
-						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+						for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
@@ -3444,7 +3447,7 @@ import rv_vector_pkg::*;
 					end
 
 					instr_vsra: begin
-						for (i = 0; i < 16 && i < vec_counter; i = i + 1) begin
+						for (i = 0; i < ELEM_P_CICLO && i < vec_counter; i = i + 1) begin
 							idx = vl - vec_counter + i;
 							if (idx >= 0 && idx < vl) begin
 								case (vsew)
