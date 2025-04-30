@@ -538,7 +538,7 @@ module picorv32
 			`ifdef VECTOR_ENABLE
             ENABLE_VEC && pcpi_vec_ready: begin
                 pcpi_int_wr = pcpi_vec_wr;
-                pcpi_int_vd = pcpi_vec_vd; // declarar la señal pcpi_int_vd
+                pcpi_int_vd = pcpi_vec_vd;
             end
             `endif
 		endcase
@@ -883,9 +883,9 @@ module picorv32
     reg is_vec_cfg;    // Es configuración vectorial
     reg is_vsetimm;
 
-    reg is_vec_vv;     // Vector-Vector
-    reg is_vec_vx;     // Vector-Scalar
-    reg is_vec_vi;     // Vector-Immediate
+    //reg is_vec_vv;     // Vector-Vector
+    //reg is_vec_vx;     // Vector-Scalar
+    //reg is_vec_vi;     // Vector-Immediate
     
     // Señales de control
     major_opcodes_t vector_opcode;
@@ -1162,9 +1162,9 @@ module picorv32
             is_vec_cfg    <= vector_opcode  == OP_V && vfunc3 == OPCFG;
             is_vsetimm    <= vector_opcode  == OP_V && vfunc3 == OPCFG && mem_rdata_latched[31] == 0;
               
-            is_vec_vv     <= vfunc3 == OPIVV;  // Vector-Vector
-            is_vec_vx     <= vfunc3 == OPIVX;  // Vector-Scalar
-            is_vec_vi     <= vfunc3 == OPIVI;  // Vector-Immediate
+            //is_vec_vv     <= vfunc3 == OPIVV;  // Vector-Vector
+            //is_vec_vx     <= vfunc3 == OPIVX;  // Vector-Scalar
+            //is_vec_vi     <= vfunc3 == OPIVI;  // Vector-Immediate
           `elsif is_vec_inst <= 0;
 		`endif
 
@@ -1754,20 +1754,6 @@ module picorv32
 	assign vregs_wdata = vm ? ( (vfunc6[4:3] == 2'b11) ? vregs_wdata_masked : vregs_wdata_temporal ) : 
 							  (vmask_all_zeros ? 'bx : ((vfunc6 == VADC || vfunc6 == VSBC) ? vregs_wdata_temporal : vregs_wdata_masked));
 	assign vregs_waddr = (!vm && (vfunc6[4:3] == 2'b11)) ? 'bx : latched_rd;
-	//assign latched_rd = (!vm && (vfunc6[4:3] == 2'b11)) ? 'bx : latched_rd;
-	//assign latched_rd  = vmask_all_zeros ? 'bx : latched_rd;
-	/*if (vmask_all_zeros) begin
-		vregs_wdata = 'bx;
-		latched_rd  = 'bx;
-	end else begin */
-		/*if (vm) begin
-			if (vfunc6[4:3] == 2'b11) assign vregs_wdata = vregs_wdata_masked;
-			else                      assign vregs_wdata = vregs_wdata_temporal;
-		end else begin
-			if (vfunc6 == VADC || vfunc6 == VSBC) assign vregs_wdata = vregs_wdata_temporal;
-			else                                  assign vregs_wdata = vregs_wdata_masked;
-		end*/
-	//end
 
     // Registros temporales para operandos vectoriales
     reg [VLEN-1:0] vpuregs_vs1;
