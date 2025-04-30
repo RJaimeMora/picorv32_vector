@@ -215,10 +215,8 @@ module picorv32
       output     [VLEN-1:0] pcpi_vec_vs1,
       output     [VLEN-1:0] pcpi_vec_vs2,
       output     [VLEN-1:0] pcpi_vec_v0,
-      input      [VLEN-1:0] pcpi_vec_vd,
-      input                 pcpi_vec_wait,
-      input                 pcpi_vec_ready,
-      input                 pcpi_vec_wr,
+      output     [31:0]     pcpi_vec_vl,
+      input      [VLEN-1:0] pcpi_vd,
 	`endif
 
 	// IRQ Interface
@@ -294,10 +292,11 @@ module picorv32
         end
         
         // Registros y señales para manejo vectorial
-        wire [31:0] vcsr_vlenb = VLEN/8; // Vector register length in bytes (128/8)
-        reg [31:0]  vcsr_vtype = {26'b0, 3'b010, 3'b000};  // Vector data type configuration
-        reg [31:0]  vcsr_vl    = VLEN/32;  // 16 elementos por defecto
+        wire [31:0] vcsr_vlenb; //= VLEN/8; // Vector register length in bytes (128/8)
+        reg [31:0]  vcsr_vtype; //= {26'b0, 3'b010, 3'b000};  // Vector data type configuration
+        reg [31:0]  vcsr_vl; //    = VLEN/32;  // 16 elementos por defecto
         reg [31:0]  new_vl;
+        //wire [4:0]  vregs_waddr = latched_rd;
         
         // Vector configuration fields
         sew_t       vsew  = sew_t'(vcsr_vtype[5:3]);  // SEW encoding (element width)
@@ -316,6 +315,12 @@ module picorv32
 	    assign pcpi_vec_vs1 = vreg_pcpi_op1;
         assign pcpi_vec_vs2 = vreg_pcpi_op2;
         assign pcpi_vec_v0  = vregs[0];
+        assign pcpi_vec_vl  = vcsr_vl;
+        
+        wire pcpi_vec_wait;
+        wire pcpi_vec_ready;
+        wire pcpi_vec_wr;
+        wire [VLEN-1:0] pcpi_vec_vd;
    
     `endif // VECTOR_ENABLE
 
@@ -476,7 +481,7 @@ module picorv32
             .clk       (clk),
             .resetn    (resetn),
             .pcpi_valid(pcpi_vec_valid),
-            .pcpi_vl   (vcsr_vl       ),
+            .pcpi_vl   (pcpi_vec_vl   ),
             .pcpi_vsew (vsew          ),
             .pcpi_insn (pcpi_vec_insn ),
             .pcpi_vs1  (pcpi_vec_vs1  ),
@@ -583,10 +588,6 @@ module picorv32
 
 	always @(posedge clk) begin
 		if (!resetn) begin
-		  `ifdef VECTOR_ENABLE
-		      vcsr_vtype <= {24'b0,1'b0, 1'b0, 3'b010, 3'b000};  // SEW=32 (010), LMUL=1 (000)
-              vcsr_vl    <= VLEN/32;  // 16 elementos por defecto
-		  `endif
 			mem_la_firstword_reg <= 0;
 			last_mem_valid       <= 0;
 		end else begin
@@ -1542,6 +1543,7 @@ module picorv32
 	  //reg [4     :0] latched_vd;
 	  reg            vregs_write;
 	  reg [VLEN-1:0] vregs_wdata;
+	  wire [4:0]  vregs_waddr = latched_rd;
 	  //reg [VLEN-1:0] vreg_result;
 	`endif
 
@@ -1646,6 +1648,7 @@ module picorv32
 	`ifdef VECTOR_ENABLE
 		reg [VLEN-1:0] vregs_wdata_masked;
     	reg [VLEN-1:0] vregs_wdata_temporal;
+    	reg vmask_all_zeros;
     `endif
 	
 	always @* begin // ESTE BLOQUE CONTROLA LA BANDERA DE ESCRITURA Y EL VALOR A ESCRIBIR
@@ -1653,6 +1656,8 @@ module picorv32
     `ifdef VECTOR_ENABLE
         vregs_write          = 0;
         vregs_wdata_temporal = 'bx;
+        vregs_wdata_masked   = 'bx;
+        vmask_all_zeros      = 1;
     `endif
 		cpuregs_write  = 0;
 		cpuregs_wrdata = 'bx;
@@ -1671,34 +1676,62 @@ module picorv32
 	        `ifdef VECTOR_ENABLE
 		        latched_vstore && !latched_branch: begin
                     vregs_wdata_temporal = vreg_out;     // Resultado vectorial
-                    if (vfunc6[4:3] == 2'b11) vregs_wdata_masked   = vregs[latched_rd];
+                    if (vfunc6[4:3] == 2'b11) vregs_wdata_masked = vregs[vregs_waddr];
                     case(vsew) 
 						SEW8: begin
 							for (int i = 0; i < VLEN/8; i = i + 1) begin
-								if (vfunc6[4:3] == 2'b11)  vregs_wdata_masked[i]        = vregs_wdata_temporal[i];
-								else if (vregs[0][i])      vregs_wdata_masked[i*8 +: 8] = vregs_wdata_temporal[i*8 +: 8];
-								else                       vregs_wdata_masked[i*8 +: 8] = vregs[latched_rd][i*8 +: 8];
+								if (vfunc6[4:3] == 2'b11) begin
+									if      (vm)          vregs_wdata_masked[i] = vregs_wdata_temporal[i];
+									else if (vregs[0][i]) vregs_wdata_masked[i] = vregs_wdata_temporal[i];
+									else                  vregs_wdata_masked[i] = vregs[vregs_waddr][i];
+								end else if (vregs[0][i]) begin
+								    vregs_wdata_masked[i*8 +: 8] = vregs_wdata_temporal[i*8 +: 8];
+								    vmask_all_zeros = 0;
+								end else begin
+								    vregs_wdata_masked[i*8 +: 8] = vregs[vregs_waddr][i*8 +: 8];
+								end
 							end
 						end
 						SEW16: begin
 							for (int i = 0; i < VLEN/16; i = i + 1) begin
-								if (vfunc6[4:3] == 2'b11)  vregs_wdata_masked[i]          = vregs_wdata_temporal[i];
-								else if (vregs[0][i])      vregs_wdata_masked[i*16 +: 16] = vregs_wdata_temporal[i*16 +: 16];
-								else                       vregs_wdata_masked[i*16 +: 16] = vregs[latched_rd][i*16 +: 16];
+								if (vfunc6[4:3] == 2'b11) begin
+									if      (vm)          vregs_wdata_masked[i] = vregs_wdata_temporal[i];
+									else if (vregs[0][i]) vregs_wdata_masked[i] = vregs_wdata_temporal[i];
+									else                  vregs_wdata_masked[i] = vregs[vregs_waddr][i];
+								end else if (vregs[0][i]) begin
+								    vregs_wdata_masked[i*16 +: 16] = vregs_wdata_temporal[i*16 +: 16];
+								    vmask_all_zeros = 0;
+								end else begin
+								    vregs_wdata_masked[i*16 +: 16] = vregs[vregs_waddr][i*16 +: 16];
+								end
 							end
 						end
 						SEW32: begin
 							for (int i = 0; i < VLEN/32; i = i + 1) begin
-								if (vfunc6[4:3] == 2'b11)  vregs_wdata_masked[i]          = vregs_wdata_temporal[i];
-								else if (vregs[0][i])      vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
-								else                       vregs_wdata_masked[i*32 +: 32] = vregs[latched_rd][i*32 +: 32];
+								if (vfunc6[4:3] == 2'b11) begin
+									if      (vm)          vregs_wdata_masked[i] = vregs_wdata_temporal[i];
+									else if (vregs[0][i]) vregs_wdata_masked[i] = vregs_wdata_temporal[i];
+									else                  vregs_wdata_masked[i] = vregs[vregs_waddr][i];
+								end else if (vregs[0][i]) begin
+								    vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
+								    vmask_all_zeros = 0;
+								end else begin
+								    vregs_wdata_masked[i*32 +: 32] = vregs[vregs_waddr][i*32 +: 32];
+								end
 							end
 						end
 						default: begin
 							for (int i = 0; i < VLEN/32; i = i + 1) begin
-								if (vfunc6[4:3] == 2'b11)  vregs_wdata_masked[i]          = vregs_wdata_temporal[i];
-								else if (vregs[0][i])      vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
-								else                       vregs_wdata_masked[i*32 +: 32] = vregs[latched_rd][i*32 +: 32];
+								if (vfunc6[4:3] == 2'b11) begin
+									if      (vm)          vregs_wdata_masked[i] = vregs_wdata_temporal[i];
+									else if (vregs[0][i]) vregs_wdata_masked[i] = vregs_wdata_temporal[i];
+									else                  vregs_wdata_masked[i] = vregs[vregs_waddr][i];
+								end else if (vregs[0][i]) begin
+								    vregs_wdata_masked[i*32 +: 32] = vregs_wdata_temporal[i*32 +: 32];
+								    vmask_all_zeros = 0;
+								end else begin
+								    vregs_wdata_masked[i*32 +: 32] = vregs[vregs_waddr][i*32 +: 32];
+								end
 							end
 						end
 					endcase
@@ -1718,8 +1751,23 @@ module picorv32
 	end
 	
 	`ifdef VECTOR_ENABLE
-	
-	assign vregs_wdata = vm ? ( (vfunc6[4:3] == 2'b11) ? vregs_wdata_masked : vregs_wdata_temporal ) : ((vfunc6 == VADC || vfunc6 == VSBC) ? vregs_wdata_temporal : vregs_wdata_masked);
+	assign vregs_wdata = vm ? ( (vfunc6[4:3] == 2'b11) ? vregs_wdata_masked : vregs_wdata_temporal ) : 
+							  (vmask_all_zeros ? 'bx : ((vfunc6 == VADC || vfunc6 == VSBC) ? vregs_wdata_temporal : vregs_wdata_masked));
+	assign vregs_waddr = (!vm && (vfunc6[4:3] == 2'b11)) ? 'bx : latched_rd;
+	//assign latched_rd = (!vm && (vfunc6[4:3] == 2'b11)) ? 'bx : latched_rd;
+	//assign latched_rd  = vmask_all_zeros ? 'bx : latched_rd;
+	/*if (vmask_all_zeros) begin
+		vregs_wdata = 'bx;
+		latched_rd  = 'bx;
+	end else begin */
+		/*if (vm) begin
+			if (vfunc6[4:3] == 2'b11) assign vregs_wdata = vregs_wdata_masked;
+			else                      assign vregs_wdata = vregs_wdata_temporal;
+		end else begin
+			if (vfunc6 == VADC || vfunc6 == VSBC) assign vregs_wdata = vregs_wdata_temporal;
+			else                                  assign vregs_wdata = vregs_wdata_masked;
+		end*/
+	//end
 
     // Registros temporales para operandos vectoriales
     reg [VLEN-1:0] vpuregs_vs1;
@@ -1728,7 +1776,7 @@ module picorv32
     // Bloque de escritura de registros vectoriales
     always @(posedge clk) begin
         if (resetn && vregs_write) begin
-        	vregs[latched_rd] <= vregs_wdata;
+        	vregs[vregs_waddr] <= vregs_wdata;
         end
     end
 
@@ -1878,6 +1926,8 @@ module picorv32
 			pcpi_valid     <= 0;
 			`ifdef VECTOR_ENABLE
 			  pcpi_vec_valid <= 0;
+			  vcsr_vtype     <= {24'b0,1'b0, 1'b0, 3'b010, 3'b000};  // SEW=32 (010), LMUL=1 (000)
+              vcsr_vl        <= VLEN >> 5;  // 16 elementos por defecto
 			`endif 
 			pcpi_timeout <= 0;
 			irq_active   <= 0;
