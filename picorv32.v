@@ -321,7 +321,23 @@ module picorv32
         wire pcpi_vec_ready;
         wire pcpi_vec_wr;
         wire [VLEN-1:0] pcpi_vec_vd;
-   
+        
+        // Control para VSE (store vector)
+		reg        vse_active;
+		reg [31:0] vse_addr;
+		reg [31:0] vse_idx;
+		reg [31:0] vse_vl;
+		reg [2:0]  vse_SEW;
+		reg [31:0] vse_stride;
+
+		// Control para VLE (load vector)
+		reg        vle_active;
+		reg [31:0] vle_addr;
+		reg [31:0] vle_idx;
+		reg [31:0] vle_vl;
+		reg [2:0]  vle_SEW;
+		reg [31:0] vle_stride;
+
     `endif // VECTOR_ENABLE
 
 	reg [63:0] count_cycle, count_instr;
@@ -871,12 +887,6 @@ module picorv32
     reg instr_vsrl;                   // Shift right logical
     reg instr_vsra;                   // Shift right arithmetic
     
-    // Registros vectoriales
-    //reg [4:0] decoded_vs1, decoded_vs2, decoded_vd;
-    //reg [10:0] decoded_vimm;
-    
-    // Señales de formato
-    
     reg is_vec_arth;   // Es operación aritmética vectorial
     reg is_vec_load;   // Es load vectorial
     reg is_vec_store;  // Es store vectorial
@@ -894,6 +904,9 @@ module picorv32
     reg [31:0] v_imm;
     reg [10:0] vtype;
     reg vill;
+    
+    reg [2:0] vmem_width;
+
 `endif
 
     reg is_vec_instr = 0;   // Es instrucción vectorial
@@ -1177,6 +1190,7 @@ module picorv32
               vfunc6        <= vfunct6_t'(mem_rdata_latched[31:26]); // Func6 para identificar operación
               v_imm         <= $signed({{27{mem_rdata_latched[19]}}, mem_rdata_latched[19:15]});
               vtype         <= mem_rdata_latched[30:20];
+              //vmem_width    <= (is_vec_load || is_vec_store) ? mem_rdata_latched[14:12] : '0;
           `endif
 		
 			instr_lui     <= mem_rdata_latched[6:0] == 7'b0110111;
@@ -1357,6 +1371,7 @@ module picorv32
 	        instr_vsetvli <= is_vec_cfg && !mem_rdata_q[31]; // vsetvli cuando el bit 31 es 0
 	        instr_vle     <= is_vec_load;
     		instr_vse     <= is_vec_store;
+    		vmem_width    <= (is_vec_load || is_vec_store) ? mem_rdata_latched[14:12] : '0;
         `endif
 
 			instr_beq   <= is_beq_bne_blt_bge_bltu_bgeu && mem_rdata_q[14:12] == 3'b000;
@@ -1441,7 +1456,7 @@ module picorv32
 			(* parallel_case *)
 			case (1'b1)
 				instr_jal:
-					decoded_imm <= decoded_imm_j;
+				    decoded_imm <= decoded_imm_j;
 				|{instr_lui, instr_auipc}:
 					decoded_imm <= mem_rdata_q[31:12] << 12;
 				|{instr_jalr, is_lb_lh_lw_lbu_lhu, is_alu_reg_imm}:
@@ -1462,6 +1477,18 @@ module picorv32
         `ifdef VECTOR_ENABLE
             // Reset vector instruction flags
             instr_vsetvli <= 0;
+            vse_active    <= 0;
+            vse_addr      <= 0;
+            vse_idx       <= 0;
+            vse_vl        <= 0;
+            vse_SEW       <= 0;
+            vse_stride    <= 0;
+            vle_active    <= 0;
+            vle_addr      <= 0;
+            vle_idx       <= 0;
+            vle_vl        <= 0;
+            vle_SEW       <= 0;
+            vle_stride    <= 0;
         `endif
 
 			instr_beq   <= 0;
@@ -2176,10 +2203,25 @@ module picorv32
 		                            cpu_state      <= cpu_state_fetch;
 								end
 						    end else if (is_vec_load || is_vec_store) begin
-						    	reg_op1      <= cpuregs_rs1;
-						    	mem_do_rinst <= 1;
-						    	if (is_vec_load) cpu_state <= cpu_state_ldmem;
-						    	else             cpu_state <= cpu_state_stmem;
+						        reg_op1      <= cpuregs_rs1;
+                                mem_do_rinst <= 1;
+                                if (is_vec_load) begin
+                                    vle_active <= 1;
+                                    vle_addr   <= cpuregs_rs1;
+                                    vle_idx    <= 0;
+                                    vle_vl     <= vcsr_vl;
+                                    vle_SEW    <= vsew;
+                                    vle_stride <= (1 << vsew);
+                                    cpu_state  <= cpu_state_ldmem;
+                                end else begin // is_vec_store
+                                    vse_active <= 1;
+                                    vse_addr   <= cpuregs_rs1;
+                                    vse_idx    <= 0;
+                                    vse_vl     <= vcsr_vl;
+                                    vse_SEW    <= vsew;
+                                    vse_stride <= (1 << vsew);
+                                    cpu_state  <= cpu_state_stmem;
+                                end
 						    end
 						end 
 						`endif
@@ -2218,72 +2260,72 @@ module picorv32
 					end
 					ENABLE_IRQ && ENABLE_IRQ_QREGS && instr_getq: begin
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						reg_out <= cpuregs_rs1;
-						dbg_rs1val <= cpuregs_rs1;
+						reg_out          <= cpuregs_rs1;
+						dbg_rs1val       <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
-						latched_store <= 1;
-						cpu_state <= cpu_state_fetch;
+						latched_store    <= 1;
+						cpu_state        <= cpu_state_fetch;
 					end
 					ENABLE_IRQ && ENABLE_IRQ_QREGS && instr_setq: begin
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						reg_out <= cpuregs_rs1;
-						dbg_rs1val <= cpuregs_rs1;
+						reg_out          <= cpuregs_rs1;
+						dbg_rs1val       <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
-						latched_rd <= latched_rd | irqregs_offset;
-						latched_store <= 1;
-						cpu_state <= cpu_state_fetch;
+						latched_rd       <= latched_rd | irqregs_offset;
+						latched_store    <= 1;
+						cpu_state        <= cpu_state_fetch;
 					end
 					ENABLE_IRQ && instr_retirq: begin
-						eoi <= 0;
-						irq_active <= 0;
-						latched_branch <= 1;
-						latched_store <= 1;
+						eoi              <= 0;
+						irq_active       <= 0;
+						latched_branch   <= 1;
+						latched_store    <= 1;
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						reg_out <= CATCH_MISALIGN ? (cpuregs_rs1 & 32'h fffffffe) : cpuregs_rs1;
-						dbg_rs1val <= cpuregs_rs1;
+						reg_out          <= CATCH_MISALIGN ? (cpuregs_rs1 & 32'h fffffffe) : cpuregs_rs1;
+						dbg_rs1val       <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
-						cpu_state <= cpu_state_fetch;
+						cpu_state        <= cpu_state_fetch;
 					end
 					ENABLE_IRQ && instr_maskirq: begin
-						latched_store <= 1;
-						reg_out <= irq_mask;
+						latched_store    <= 1;
+						reg_out          <= irq_mask;
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						irq_mask <= cpuregs_rs1 | MASKED_IRQ;
-						dbg_rs1val <= cpuregs_rs1;
+						irq_mask         <= cpuregs_rs1 | MASKED_IRQ;
+						dbg_rs1val       <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
-						cpu_state <= cpu_state_fetch;
+						cpu_state        <= cpu_state_fetch;
 					end
 					ENABLE_IRQ && ENABLE_IRQ_TIMER && instr_timer: begin
-						latched_store <= 1;
-						reg_out <= timer;
+						latched_store    <= 1;
+						reg_out          <= timer;
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						timer <= cpuregs_rs1;
-						dbg_rs1val <= cpuregs_rs1;
+						timer            <= cpuregs_rs1;
+						dbg_rs1val       <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
-						cpu_state <= cpu_state_fetch;
+						cpu_state        <= cpu_state_fetch;
 					end
 					is_lb_lh_lw_lbu_lhu && !instr_trap: begin
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						reg_op1    <= cpuregs_rs1;
-						dbg_rs1val <= cpuregs_rs1;
+						reg_op1          <= cpuregs_rs1;
+						dbg_rs1val       <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
-						cpu_state <= cpu_state_ldmem;
-						mem_do_rinst <= 1;
+						cpu_state        <= cpu_state_ldmem;
+						mem_do_rinst     <= 1;
 					end
 					is_slli_srli_srai && !BARREL_SHIFTER: begin
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						reg_op1 <= cpuregs_rs1;
-						dbg_rs1val <= cpuregs_rs1;
+						reg_op1          <= cpuregs_rs1;
+						dbg_rs1val       <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
-						reg_sh <= decoded_rs2;
-						cpu_state <= cpu_state_shift;
+						reg_sh           <= decoded_rs2;
+						cpu_state        <= cpu_state_shift;
 					end
 					is_jalr_addi_slti_sltiu_xori_ori_andi, is_slli_srli_srai && BARREL_SHIFTER: begin
 						`debug($display("LD_RS1: %2d 0x%08x", decoded_rs1, cpuregs_rs1);)
-						reg_op1    <= cpuregs_rs1;
-						dbg_rs1val <= cpuregs_rs1;
+						reg_op1          <= cpuregs_rs1;
+						dbg_rs1val       <= cpuregs_rs1;
 						dbg_rs1val_valid <= 1;
-						reg_op2 <= is_slli_srli_srai && BARREL_SHIFTER ? decoded_rs2 : decoded_imm;
+						reg_op2          <= is_slli_srli_srai && BARREL_SHIFTER ? decoded_rs2 : decoded_imm;
 						if (TWO_CYCLE_ALU)
 							alu_wait <= 1;
 						else
@@ -2423,66 +2465,142 @@ module picorv32
 			end
 
 			cpu_state_stmem: begin
-			
-				if (ENABLE_TRACE)
-					reg_out <= reg_op2;
-				if (!mem_do_prefetch || mem_done) begin
-					if (!mem_do_wdata) begin
-						(* parallel_case, full_case *)
-						case (1'b1)
-							instr_sb: mem_wordsize <= 2;
-							instr_sh: mem_wordsize <= 1;
-							instr_sw: mem_wordsize <= 0;
-						endcase
-						if (ENABLE_TRACE) begin
-							trace_valid <= 1;
-							trace_data <= (irq_active ? TRACE_IRQ : 0) | TRACE_ADDR | ((reg_op1 + decoded_imm) & 32'hffffffff);
-						end
-						reg_op1 <= reg_op1 + decoded_imm;
-						set_mem_do_wdata = 1;
-					end
-					if (!mem_do_prefetch && mem_done) begin
-						cpu_state <= cpu_state_fetch;
-						decoder_trigger <= 1;
-						decoder_pseudo_trigger <= 1;
-					end
-				end
-			end
+                // --- VECTORIAL: VSE ---
+                if (vse_active) begin
+                    // Lanzar escritura si no hay transferencia pendiente y quedan elementos
+                    if (!mem_do_wdata && vse_idx < vse_vl) begin
+                        case (vmem_width)
+                            3'b000: begin // 8 bits
+                                mem_wdata    <= {4{vregs[decoded_rs2][vse_idx*8 +: 8]}};
+                                mem_wstrb    <= 4'b0001 << vse_addr[1:0];
+                                mem_wordsize <= 2;
+                            end
+                            3'b001: begin // 16 bits
+                                mem_wdata    <= {2{vregs[decoded_rs2][vse_idx*16 +: 16]}};
+                                mem_wstrb    <= vse_addr[1] ? 4'b1100 : 4'b0011;
+                                mem_wordsize <= 1;
+                            end
+                            default: begin // 32 bits
+                                mem_wdata    <= vregs[decoded_rs2][vse_idx*32 +: 32];
+                                mem_wstrb    <= 4'b1111;
+                                mem_wordsize <= 0;
+                            end
+                        endcase
+                        mem_addr  <= vse_addr;
+                        mem_valid <= 1;
+                        set_mem_do_wdata = 1;
+                    end
+            
+                    // Cuando termina la escritura, avanzar al siguiente elemento
+                    if (mem_done && !mem_do_prefetch && vse_idx < vse_vl) begin
+                        vse_idx  <= vse_idx + 1;
+                        vse_addr <= vse_addr + (1 << vmem_width); // stride = tamaño de acceso
+                        if (vse_idx + 1 == vse_vl) begin
+                            vse_active <= 0;
+                            cpu_state <= cpu_state_fetch;
+                            decoder_trigger <= 1;
+                            decoder_pseudo_trigger <= 1;
+                        end
+                    end
+            
+                end else begin
+                    // --- ESCALAR: sb/sh/sw ---
+                    if (ENABLE_TRACE)
+                        reg_out <= reg_op2;
+                    if (!mem_do_prefetch || mem_done) begin
+                        if (!mem_do_wdata) begin
+                            (* parallel_case, full_case *)
+                            case (1'b1)
+                                instr_sb: mem_wordsize <= 2;
+                                instr_sh: mem_wordsize <= 1;
+                                instr_sw: mem_wordsize <= 0;
+                            endcase
+                            if (ENABLE_TRACE) begin
+                                trace_valid <= 1;
+                                trace_data <= (irq_active ? TRACE_IRQ : 0) | TRACE_ADDR | ((reg_op1 + decoded_imm) & 32'hffffffff);
+                            end
+                            reg_op1 <= reg_op1 + decoded_imm;
+                            set_mem_do_wdata = 1;
+                        end
+                        if (!mem_do_prefetch && mem_done) begin
+                            cpu_state <= cpu_state_fetch;
+                            decoder_trigger <= 1;
+                            decoder_pseudo_trigger <= 1;
+                        end
+                    end
+                end
+            end 
+
 
 			cpu_state_ldmem: begin
-			
-				latched_store <= 1;
-				if (!mem_do_prefetch || mem_done) begin
-					if (!mem_do_rdata) begin
-						(* parallel_case, full_case *)
-						case (1'b1)
-							instr_lb || instr_lbu: mem_wordsize <= 2;
-							instr_lh || instr_lhu: mem_wordsize <= 1;
-							instr_lw:              mem_wordsize <= 0;
-						endcase
-						latched_is_lu <= is_lbu_lhu_lw;
-						latched_is_lh <= instr_lh;
-						latched_is_lb <= instr_lb;
-						if (ENABLE_TRACE) begin
-							trace_valid <= 1;
-							trace_data <= (irq_active ? TRACE_IRQ : 0) | TRACE_ADDR | ((reg_op1 + decoded_imm) & 32'hffffffff);
-						end
-						reg_op1 <= reg_op1 + decoded_imm;
-						set_mem_do_rdata = 1;
-					end
-					if (!mem_do_prefetch && mem_done) begin
-						(* parallel_case, full_case *)
-						case (1'b1)
-							latched_is_lu: reg_out <= mem_rdata_word;
-							latched_is_lh: reg_out <= $signed(mem_rdata_word[15:0]);
-							latched_is_lb: reg_out <= $signed(mem_rdata_word[7:0]);
-						endcase
-						decoder_trigger <= 1;
-						decoder_pseudo_trigger <= 1;
-						cpu_state <= cpu_state_fetch;
-					end
-				end
-			end
+                latched_store <= 1;
+            
+                // --- VECTORIAL: VLE ---
+                if (vle_active) begin
+                    // Lanzar lectura si no hay transferencia pendiente y quedan elementos
+                    if (!mem_do_rdata && vle_idx < vle_vl) begin
+                        case (vmem_width)
+                            3'b000: mem_wordsize <= 2; // 8 bits
+                            3'b001: mem_wordsize <= 1; // 16 bits
+                            default: mem_wordsize <= 0; // 32 bits
+                        endcase
+                        mem_addr  <= vle_addr;
+                        mem_valid <= 1;
+                        set_mem_do_rdata = 1;
+                    end
+            
+                    // Cuando termina la lectura, almacenar en el registro vectorial
+                    if (mem_done && !mem_do_prefetch && vle_idx < vle_vl) begin
+                        case (vmem_width)
+                            3'b000: vregs[decoded_rd][vle_idx*8 +: 8]   <= mem_rdata_word[7:0];
+                            3'b001: vregs[decoded_rd][vle_idx*16 +: 16] <= mem_rdata_word[15:0];
+                            default: vregs[decoded_rd][vle_idx*32 +: 32] <= mem_rdata_word[31:0];
+                        endcase
+                        vle_idx  <= vle_idx + 1;
+                        vle_addr <= vle_addr + (1 << vmem_width); // stride = tamaño de acceso
+                        if (vle_idx + 1 == vle_vl) begin
+                            vle_active <= 0;
+                            cpu_state <= cpu_state_fetch;
+                            decoder_trigger <= 1;
+                            decoder_pseudo_trigger <= 1;
+                        end
+                    end
+            
+                end else begin
+                    // --- ESCALAR: lb/lh/lw/lbu/lhu ---
+                    if (!mem_do_prefetch || mem_done) begin
+                        if (!mem_do_rdata) begin
+                            (* parallel_case, full_case *)
+                            case (1'b1)
+                                instr_lb || instr_lbu: mem_wordsize <= 2;
+                                instr_lh || instr_lhu: mem_wordsize <= 1;
+                                instr_lw:              mem_wordsize <= 0;
+                            endcase
+                            latched_is_lu <= is_lbu_lhu_lw;
+                            latched_is_lh <= instr_lh;
+                            latched_is_lb <= instr_lb;
+                            if (ENABLE_TRACE) begin
+                                trace_valid <= 1;
+                                trace_data <= (irq_active ? TRACE_IRQ : 0) | TRACE_ADDR | ((reg_op1 + decoded_imm) & 32'hffffffff);
+                            end
+                            reg_op1 <= reg_op1 + decoded_imm;
+                            set_mem_do_rdata = 1;
+                        end
+                        if (!mem_do_prefetch && mem_done) begin
+                            (* parallel_case, full_case *)
+                            case (1'b1)
+                                latched_is_lu: reg_out <= mem_rdata_word;
+                                latched_is_lh: reg_out <= $signed(mem_rdata_word[15:0]);
+                                latched_is_lb: reg_out <= $signed(mem_rdata_word[7:0]);
+                            endcase
+                            decoder_trigger <= 1;
+                            decoder_pseudo_trigger <= 1;
+                            cpu_state <= cpu_state_fetch;
+                        end
+                    end
+                end
+            end 
+
 		endcase
 
 		if (ENABLE_IRQ) begin
