@@ -337,6 +337,7 @@ module picorv32
 		reg [31:0] vle_vl;
 		reg [2:0]  vle_SEW;
 		reg [31:0] vle_stride;
+		reg [VLEN-1:0] vle_buffer;
 
     `endif // VECTOR_ENABLE
 
@@ -787,7 +788,7 @@ module picorv32
 			prefetched_high_word <= 0;
 		end else begin
 			if (mem_la_read || mem_la_write) begin
-				mem_addr <= mem_la_addr;
+				mem_addr <= (vse_active || vle_active) ? mem_addr : mem_la_addr;
 				mem_wstrb <= mem_la_wstrb & {4{mem_la_write}};
 			end
 			if (mem_la_write) begin 
@@ -1170,8 +1171,8 @@ module picorv32
 		`ifdef VECTOR_ENABLE
 		    is_vec_instr  <= |{vector_opcode == OP_V, vector_opcode == LOAD_FP, vector_opcode == STORE_FP};
             is_vec_arth   <= vector_opcode  == OP_V && vfunc3 != OPCFG;
-            is_vec_load   <= vector_opcode  == LOAD_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[28:26] == 3'b000;
-            is_vec_store  <= vector_opcode  == STORE_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[28:26] == 3'b000;
+            is_vec_load   <= vector_opcode  == LOAD_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[31:26] == 6'b000000;
+            is_vec_store  <= vector_opcode  == STORE_FP && mem_rdata_latched[24:20] == 5'b00000 && mem_rdata_latched[31:26] == 6'b000000;
             is_vec_cfg    <= vector_opcode  == OP_V && vfunc3 == OPCFG;
             is_vsetimm    <= vector_opcode  == OP_V && vfunc3 == OPCFG && mem_rdata_latched[31] == 0;
               
@@ -1489,6 +1490,7 @@ module picorv32
             vle_vl        <= 0;
             vle_SEW       <= 0;
             vle_stride    <= 0;
+            vle_buffer    <= 0;
         `endif
 
 			instr_beq   <= 0;
@@ -2213,6 +2215,7 @@ module picorv32
                                     vle_SEW    <= vsew;
                                     vle_stride <= (1 << vsew);
                                     cpu_state  <= cpu_state_ldmem;
+                                    vle_buffer <= '0;
                                 end else begin // is_vec_store
                                     vse_active <= 1;
                                     vse_addr   <= cpuregs_rs1;
@@ -2468,20 +2471,21 @@ module picorv32
                 // --- VECTORIAL: VSE ---
                 if (vse_active) begin
                     // Lanzar escritura si no hay transferencia pendiente y quedan elementos
-                    if (!mem_do_wdata && vse_idx < vse_vl) begin
+                    if (!mem_do_wdata && (vse_idx < vse_vl)) begin
                         case (vmem_width)
                             3'b000: begin // 8 bits
-                                mem_wdata    <= {4{vregs[decoded_rs2][vse_idx*8 +: 8]}};
-                                mem_wstrb    <= 4'b0001 << vse_addr[1:0];
+                                mem_wdata <= {24'b0, vregs[latched_rd][vse_idx*8 +: 8]};
+                                //mem_wdata <= {24'b0, 8'b11111111};
+                                mem_wstrb    <= 4'b0001;
                                 mem_wordsize <= 2;
                             end
                             3'b001: begin // 16 bits
-                                mem_wdata    <= {2{vregs[decoded_rs2][vse_idx*16 +: 16]}};
+                                mem_wdata    <= {2{vregs[latched_rd][vse_idx*16 +: 16]}};
                                 mem_wstrb    <= vse_addr[1] ? 4'b1100 : 4'b0011;
                                 mem_wordsize <= 1;
                             end
                             default: begin // 32 bits
-                                mem_wdata    <= vregs[decoded_rs2][vse_idx*32 +: 32];
+                                mem_wdata    <= vregs[latched_rd][vse_idx*32 +: 32];
                                 mem_wstrb    <= 4'b1111;
                                 mem_wordsize <= 0;
                             end
@@ -2497,6 +2501,7 @@ module picorv32
                         vse_addr <= vse_addr + (1 << vmem_width); // stride = tamaño de acceso
                         if (vse_idx + 1 == vse_vl) begin
                             vse_active <= 0;
+                            mem_addr <= reg_next_pc;
                             cpu_state <= cpu_state_fetch;
                             decoder_trigger <= 1;
                             decoder_pseudo_trigger <= 1;
@@ -2533,12 +2538,11 @@ module picorv32
 
 
 			cpu_state_ldmem: begin
-                latched_store <= 1;
-            
                 // --- VECTORIAL: VLE ---
                 if (vle_active) begin
+                    //latched_store <= 1;
                     // Lanzar lectura si no hay transferencia pendiente y quedan elementos
-                    if (!mem_do_rdata && vle_idx < vle_vl) begin
+                    if (!mem_do_rdata && vle_idx <= vle_vl) begin
                         case (vmem_width)
                             3'b000: mem_wordsize <= 2; // 8 bits
                             3'b001: mem_wordsize <= 1; // 16 bits
@@ -2550,23 +2554,29 @@ module picorv32
                     end
             
                     // Cuando termina la lectura, almacenar en el registro vectorial
-                    if (mem_done && !mem_do_prefetch && vle_idx < vle_vl) begin
+                    if (mem_done && !mem_do_prefetch && vle_idx <= vle_vl) begin
                         case (vmem_width)
-                            3'b000: vregs[decoded_rd][vle_idx*8 +: 8]   <= mem_rdata_word[7:0];
-                            3'b001: vregs[decoded_rd][vle_idx*16 +: 16] <= mem_rdata_word[15:0];
-                            default: vregs[decoded_rd][vle_idx*32 +: 32] <= mem_rdata_word[31:0];
+                           /* 3'b000: vregs[latched_rd][vle_idx*8 +: 8]    <= mem_rdata_word[7:0];
+                            3'b001: vregs[latched_rd][vle_idx*16 +: 16]  <= mem_rdata_word[15:0];
+                            default: vregs[latched_rd][vle_idx*32 +: 32] <= mem_rdata_word[31:0];*/
+                            3'b000: vle_buffer[vle_idx*8 +: 8]   <= mem_rdata_word[7:0];
+                            3'b001: vle_buffer[vle_idx*16 +: 16] <= mem_rdata_word[15:0];
+                            default: vle_buffer[vle_idx*32 +: 32] <= mem_rdata_word[31:0];
                         endcase
                         vle_idx  <= vle_idx + 1;
                         vle_addr <= vle_addr + (1 << vmem_width); // stride = tamaño de acceso
-                        if (vle_idx + 1 == vle_vl) begin
-                            vle_active <= 0;
-                            cpu_state <= cpu_state_fetch;
-                            decoder_trigger <= 1;
+                        if (vle_idx == vle_vl) begin
+                            latched_vstore         <= 1;
+                            vreg_out               <= vle_buffer;
+                            vle_active             <= 0;
+                            cpu_state              <= cpu_state_fetch;
+                            decoder_trigger        <= 1;
                             decoder_pseudo_trigger <= 1;
                         end
                     end
             
                 end else begin
+                    latched_store <= 1;
                     // --- ESCALAR: lb/lh/lw/lbu/lhu ---
                     if (!mem_do_prefetch || mem_done) begin
                         if (!mem_do_rdata) begin
